@@ -218,6 +218,26 @@ async function doLogout(){
   showLogin();
 }
 
+// 登录回车：电脑端等同点击登录，手机端收起键盘
+function isTouchDevice(){
+  try{
+    return window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+  }catch(e){ return false; }
+}
+function bindLoginEnter(){
+  ['u-name', 'u-pass', 'u-pass2'].forEach(id=>{
+    const el = $(id);
+    if(!el) return;
+    el.addEventListener('keydown', e=>{
+      if(e.key !== 'Enter') return;
+      e.preventDefault();
+      if(isTouchDevice()){ el.blur(); }
+      else doAuth();
+    });
+  });
+}
+bindLoginEnter();
+
 function currentUser(){
   try{ return JSON.parse(localStorage.getItem('user') || 'null'); }catch(e){ return null; }
 }
