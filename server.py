@@ -8,12 +8,14 @@
 """
 import json
 import os
+import re
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from admin import (list_users, change_password, admin_reset_password,
                    set_user_disabled, delete_user)
 from auth import ensure_admin, register, login, logout, check_auth
+from backup import export_records, import_records, backup_info
 from categories import build_category_tree, add_category, delete_category
 from db import init_db
 from records import add_record
@@ -70,6 +72,43 @@ class Handler(BaseHTTPRequestHandler):
             return h[7:].strip()
         return None
 
+    def _read_multipart_file(self):
+        """读取 multipart/form-data 中第一个带 filename 的文件，返回其字节。"""
+        ctype = self.headers.get("Content-Type", "")
+        m = re.search(r"boundary=(.+)$", ctype)
+        if not m:
+            return None
+        boundary = m.group(1).strip().strip('"')
+        length = int(self.headers.get("Content-Length", 0) or 0)
+        raw = self.rfile.read(length)
+        sep = ("--" + boundary).encode()
+        for part in raw.split(sep):
+            part = part.lstrip(b"\r\n")
+            if part.startswith(b"Content-Disposition") and b"filename=" in part:
+                header_end = part.find(b"\r\n\r\n")
+                if header_end == -1:
+                    continue
+                body = part[header_end + 4:]
+                if body.endswith(b"\r\n"):
+                    body = body[:-2]
+                return body
+        return None
+
+    def _send_bytes(self, body, content_type, filename):
+        """发送二进制响应（用于文件下载）。"""
+        base = os.path.basename(filename)
+        # BaseHTTPRequestHandler 只会 latin-1 编码响应头，中文文件名需用 percent 编码的 RFC5987
+        ascii_name = re.sub(r"[^\x00-\x7f]", "_", base)
+        from urllib.parse import quote
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Disposition",
+                         "attachment; filename=\"{}\"; filename*=UTF-8''{}".format(ascii_name, quote(base)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def _require_admin(self):
         """管理员鉴权。通过返回用户信息，否则已发错误响应并返回 None。"""
         user = check_auth(self._bearer_token())
@@ -106,6 +145,13 @@ class Handler(BaseHTTPRequestHandler):
             uid = user["id"]
             if path == "/api/categories":
                 json_response(self, {"categories": build_category_tree(uid)})
+            elif path == "/api/backup/info":
+                json_response(self, {"code": 0, "message": "ok",
+                                     "data": backup_info(uid)})
+            elif path == "/api/export":
+                data = export_records(uid)
+                name = "记账备份_{}.xlsx".format(datetime.now().strftime("%Y%m%d"))
+                self._send_bytes(data, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", name)
             elif path in ("/api/statistics", "/api/report"):
                 month = self._query_param("month") or datetime.now().strftime("%Y-%m")
                 data = get_statistics(uid, month) if path == "/api/statistics" else {"report": get_report(uid, month)}
@@ -117,6 +163,25 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = self.path.split("?")[0]
+        if path == "/api/import":
+            user = check_auth(self._bearer_token())
+            if not user:
+                json_response(self, {"code": 1, "message": "未登录或登录已过期"}, 401)
+                return
+            body = self._read_multipart_file()
+            if body is None:
+                json_response(self, {"code": 1, "message": "未找到上传文件"}, 400)
+                return
+            try:
+                result = import_records(user["id"], body)
+            except Exception as e:
+                json_response(self, {"code": 1, "message": "Excel 解析失败：{}".format(e)}, 400)
+                return
+            if "error" in result:
+                json_response(self, {"code": 1, "message": result["error"]}, 400)
+                return
+            json_response(self, {"code": 0, "message": "ok", "data": result}, 201)
+            return
         try:
             payload = self._read_json()
         except Exception:
