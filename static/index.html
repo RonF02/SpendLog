@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>个人记账</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="app">
+  <header><h1>个人记账</h1></header>
+
+  <section id="page-add" class="active">
+    <div class="card">
+      <div class="label">金额（支出填负值，收入填正值）</div>
+      <input id="f-amount" class="amount-input" type="number" step="0.01" placeholder="0.00">
+      <div class="row">
+        <div><input id="f-date" type="date"></div>
+        <div><select id="f-payment"><option>微信</option><option>支付宝</option><option>现金</option><option>银行卡</option><option>其他</option></select></div>
+      </div>
+      <div class="label" style="margin-top:12px">一级分类</div>
+      <div class="chips" id="chips-main"></div>
+      <div class="addbar" onclick="toggleMainAdd()">＋ 新增分类标签</div>
+      <div class="addform" id="addm" style="display:none">
+        <input id="m-name" placeholder="名称，如：餐饮">
+        <input id="m-code" placeholder="标识（英文唯一），如：food">
+        <button class="mini-btn" onclick="doAddMain()">添加一级</button>
+      </div>
+      <div class="label" style="margin-top:8px">二级分类</div>
+      <div class="chips" id="chips-sub"></div>
+      <div class="addbar" onclick="toggleSubAdd()">＋ 新增二级标签</div>
+      <div class="addform" id="adds" style="display:none">
+        <input id="s-name" placeholder="名称，如：晚餐">
+        <input id="s-code" placeholder="标识（英文唯一），如：dinner">
+        <button class="mini-btn" onclick="doAddSub()">添加二级</button>
+      </div>
+      <div class="label" style="margin-top:12px">备注</div>
+      <input id="f-note" type="text" placeholder="选填">
+      <button class="btn" onclick="submitRecord()">保存</button>
+    </div>
+  </section>
+
+  <section id="page-stat">
+    <div class="month">
+      <button onclick="shiftMonth(-1)">◀</button>
+      <input id="f-month" type="month" onchange="loadStat()">
+      <button onclick="shiftMonth(1)">▶</button>
+    </div>
+    <div class="stat-top">
+      <div class="stat-card"><div class="label">收入</div><div class="v green" id="s-income">0</div></div>
+      <div class="stat-card"><div class="label">支出</div><div class="v red" id="s-expense">0</div></div>
+      <div class="stat-card"><div class="label">结余</div><div class="v" id="s-balance">0</div></div>
+    </div>
+    <h2>支出占比（按一级分类）</h2>
+    <div class="card" id="s-bymain"></div>
+    <h2>支出明细（按二级分类）</h2>
+    <div class="card" id="s-bysub"></div>
+    <h2>完整报表（含备注）</h2>
+    <div class="card">
+      <div class="addbar" onclick="toggleReport()" id="report-toggle">＋ 展开本月完整报表</div>
+      <div id="s-report" style="display:none;margin-top:4px"></div>
+    </div>
+  </section>
+</div>
+
+<div class="tabbar">
+  <div id="tab-add" class="active" onclick="switchPage('add')">记一笔</div>
+  <div id="tab-stat" onclick="switchPage('stat')">统计</div>
+</div>
+<div id="toast"></div>
+
+<script>
+let categories = [];
+let curMain = null;
+
+function $(id){ return document.getElementById(id); }
+
+function toast(msg, ok){
+  const t = $('toast');
+  t.style.background = ok ? 'rgba(0,180,90,.85)' : 'rgba(0,0,0,.75)';
+  t.textContent = msg;
+  t.style.display = 'block';
+  clearTimeout(toast._t);
+  toast._t = setTimeout(()=> t.style.display='none', 1800);
+}
+
+async function api(path, opts){
+  const r = await fetch(path, opts);
+  const j = await r.json();
+  if(!r.ok) throw new Error(j.message || '请求失败');
+  return j;
+}
+
+function fmt(n){
+  return (Math.round((n||0)*100)/100).toLocaleString('zh-CN');
+}
+
+function switchPage(name){
+  $('page-add').classList.toggle('active', name==='add');
+  $('page-stat').classList.toggle('active', name==='stat');
+  $('tab-add').classList.toggle('active', name==='add');
+  $('tab-stat').classList.toggle('active', name==='stat');
+  if(name==='stat') loadStat();
+}
+
+function mainOf(code){ return categories.find(c=>c.code===code); }
+
+async function loadCategories(){
+  const j = await api('/api/categories');
+  categories = j.categories;
+  renderMainChips();
+}
+
+// 记一笔页内联新增
+function toggleMainAdd(){ $('addm').style.display = $('addm').style.display==='none' ? 'flex' : 'none'; }
+function toggleSubAdd(){ $('adds').style.display = $('adds').style.display==='none' ? 'flex' : 'none'; }
+
+async function doAddMain(){
+  const name = $('m-name').value.trim();
+  const code = $('m-code').value.trim();
+  if(!name || !code){ toast('请填写名称和标识'); return; }
+  try{
+    await api('/api/categories', { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ name, code }) });
+    $('m-name').value=''; $('m-code').value=''; $('addm').style.display='none';
+    await loadCategories();
+    toast('已添加一级分类', true);
+  }catch(e){ toast(e.message); }
+}
+
+async function doAddSub(){
+  if(!curMain){ toast('请先选择一级分类'); return; }
+  const name = $('s-name').value.trim();
+  const code = $('s-code').value.trim();
+  if(!name || !code){ toast('请填写名称和标识'); return; }
+  try{
+    await api('/api/categories', { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ name, code, parent_code: curMain }) });
+    $('s-name').value=''; $('s-code').value=''; $('adds').style.display='none';
+    await loadCategories();
+    selectMain(curMain);
+    toast('已添加二级分类', true);
+  }catch(e){ toast(e.message); }
+}
+
+// 分类标签长按 / 右键弹出删除大叉
+let delTimer = null;
+function closeDelMark(){
+  document.querySelectorAll('.del-mark.show').forEach(m=>m.classList.remove('show'));
+}
+function showDelMark(chip){
+  closeDelMark();
+  if(window.getSelection && window.getSelection().removeAllRanges){
+    window.getSelection().removeAllRanges();
+  }
+  const mark = chip.querySelector('.del-mark');
+  if(!mark) return;
+  mark.classList.toggle('red', chip.dataset.used !== '1');
+  mark.classList.toggle('gray', chip.dataset.used === '1');
+  mark.classList.add('show');
+}
+function bindChipDelete(chip){
+  chip.addEventListener('touchstart', e=>{
+    delTimer = setTimeout(()=>{ showDelMark(chip); }, 500);
+  }, { passive: true });
+  ['touchend','touchmove','touchcancel'].forEach(ev=>{
+    chip.addEventListener(ev, ()=> clearTimeout(delTimer), { passive: true });
+  });
+  chip.addEventListener('contextmenu', e=>{ e.preventDefault(); showDelMark(chip); });
+  const mark = document.createElement('span');
+  mark.className = 'del-mark';
+  mark.innerHTML = '✕';
+  mark.onclick = e=>{
+    e.stopPropagation();
+    delChip(chip.dataset.code, chip.dataset.used === '1');
+  };
+  chip.appendChild(mark);
+}
+async function delChip(code, used){
+  if(used){ toast('该分类已被记账使用，无法删除'); return; }
+  try{
+    await api('/api/categories?code='+encodeURIComponent(code), { method:'DELETE' });
+    if(curMain===code) curMain = categories[0] ? categories[0].code : null;
+    await loadCategories();
+    toast('已删除', true);
+  }catch(e){ toast(e.message); }
+}
+
+function renderMainChips(){
+  const box = $('chips-main');
+  box.innerHTML = '';
+  categories.forEach(c=>{
+    const chip = document.createElement('div');
+    chip.className = 'chip';
+    chip.dataset.code = c.code;
+    chip.dataset.used = c.used ? '1' : '0';
+    chip.textContent = c.name;
+    chip.onclick = ()=> selectMain(c.code);
+    bindChipDelete(chip);
+    box.appendChild(chip);
+  });
+  if(categories.length && !mainOf(curMain)) selectMain(categories[0].code);
+  else selectMain(curMain);
+}
+
+function selectMain(code){
+  curMain = code;
+  document.querySelectorAll('#chips-main .chip').forEach(ch=>{
+    ch.classList.toggle('active', ch.dataset.code === code);
+  });
+  renderSubChips(code);
+}
+
+function renderSubChips(code){
+  const m = mainOf(code);
+  const box = $('chips-sub');
+  box.innerHTML = '';
+  if(!m) return;
+  m.children.forEach(c=>{
+    const chip = document.createElement('div');
+    chip.className = 'chip';
+    chip.textContent = c.name;
+    chip.dataset.code = c.code;
+    chip.dataset.used = c.used ? '1' : '0';
+    chip.onclick = ()=>{
+      document.querySelectorAll('#chips-sub .chip').forEach(x=>x.classList.remove('active'));
+      chip.classList.add('active');
+    };
+    bindChipDelete(chip);
+    box.appendChild(chip);
+  });
+  setTimeout(()=>{ if(box.firstChild) box.firstChild.classList.add('active'); },0);
+}
+
+async function submitRecord(){
+  const amount = parseFloat($('f-amount').value);
+  if(isNaN(amount) || amount===0){ toast('请输入有效金额'); return; }
+  const selSub = document.querySelector('#chips-sub .chip.active');
+  if(!selSub){ toast('请选择二级分类'); return; }
+  const date = $('f-date').value;
+  if(!date){ toast('请选择日期'); return; }
+  const payload = {
+    date,
+    amount,
+    category_code: selSub.dataset.code,
+    note: $('f-note').value.trim(),
+    payment: $('f-payment').value
+  };
+  try{
+    await api('/api/records', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(payload)
+    });
+    $('f-amount').value=''; $('f-note').value='';
+    toast('已保存', true);
+  }catch(e){ toast(e.message); }
+}
+
+let curReportMonth = null;
+
+async function loadStat(){
+  const month = $('f-month').value || new Date().toISOString().slice(0,7);
+  $('f-month').value = month;
+  curReportMonth = month;
+  // 若报表此前已展开，切换月份后继续载入该月
+  if($('s-report').style.display === 'block'){ renderReport(); }
+  const j = await api('/api/statistics?month='+month);
+  $('s-income').textContent = fmt(j.incomeTotal);
+  $('s-expense').textContent = fmt(j.expenseTotal);
+  $('s-balance').textContent = fmt(j.balance);
+  const maxC = j.expenseTotal || 1;
+  $('s-bymain').innerHTML = j.byMainCategory.length ? j.byMainCategory.map(m=>
+    `<div class="cat-row"><span>${m.name}（${m.percent}%）</span><span class="amt red">${fmt(m.total)}</span></div>
+     <div class="bar"><i style="width:${Math.min(100,(m.total/maxC)*100)}%"></i></div>`
+  ).join('') : '<span class="note">暂无支出数据</span>';
+  $('s-bysub').innerHTML = j.bySubCategory.length ? j.bySubCategory.map(s=>
+    `<div class="cat-row"><span>${s.name}</span><span class="amt red">${fmt(s.total)}</span></div>`
+  ).join('') : '<span class="note">暂无支出数据</span>';
+}
+
+async function renderReport(){
+  const box = $('s-report');
+  try{
+    const j = await api('/api/report?month='+(curReportMonth||$('f-month').value));
+    const list = j.report || [];
+    if(!list.length){ box.innerHTML = '<span class="note">本月暂无记录</span>'; toggleReport(); return; }
+    box.innerHTML = list.map(r=>
+      `<div class="cat-row"><span>${r.date} · ${r.main}<i class="subname">${r.sub}</i></span>`+
+      `<span class="amt ${r.amount<0?'red':'green'}">${fmt(r.amount)}</span></div>`+
+      `<div class="note">${r.note||'—'}${r.payment?' · '+r.payment:''}</div>`
+    ).join('');
+  }catch(e){ box.innerHTML = '<span class="note">'+e.message+'</span>'; }
+}
+
+function toggleReport(){
+  const box = $('s-report');
+  const on = box.style.display !== 'block';
+  box.style.display = on ? 'block' : 'none';
+  $('report-toggle').textContent = on ? '－ 收起完整报表' : '＋ 展开本月完整报表';
+  if(on) renderReport();
+}
+
+function shiftMonth(delta){
+  const v = $('f-month').value || new Date().toISOString().slice(0,7);
+  const [y,m] = v.split('-').map(Number);
+  let d = new Date(y, m-1+delta, 1);
+  $('f-month').value = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+  loadStat();
+}
+
+// 初始化
+$('f-date').value = new Date().toISOString().slice(0,10);
+$('f-month').value = new Date().toISOString().slice(0,7);
+loadCategories().catch(e=>toast(e.message));
+</script>
+</body>
+</html>
