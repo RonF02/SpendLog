@@ -23,7 +23,8 @@ from db import init_db
 from records import add_record
 from statistics import get_statistics, get_report
 
-STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # 项目根目录（本文件位于 script/）
+STATIC_DIR = os.path.join(BASE_DIR, "static")
 HOST = "0.0.0.0"
 PORT = 8080
 

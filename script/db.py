@@ -7,7 +7,7 @@
 import os
 import sqlite3
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # 项目根目录（本文件位于 script/）
 DATA_DIR = os.path.join(BASE_DIR, "data")
 ACCOUNTS_DB = os.path.join(DATA_DIR, "accounts.db")
 
