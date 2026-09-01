@@ -7,6 +7,7 @@
 """
 import hmac
 import os
+from datetime import datetime
 
 from auth import _hash_password, invalidate_sessions
 from db import get_accounts_conn, get_user_conn, delete_user_db, user_db_path
@@ -118,4 +119,43 @@ def delete_user(target_uid):
     if cur.rowcount == 0:
         return None, "用户不存在"
     delete_user_db(target_uid)
+    return True, None
+
+
+def list_sessions():
+    """管理员视角：列出全部用户的当前有效登录会话，以用户为主维度分组。"""
+    now = datetime.now().isoformat(timespec="seconds")
+    conn = get_accounts_conn()
+    rows = conn.execute(
+        "SELECT s.token, s.expires_at, s.created_at, s.user_agent, "
+        "a.id AS user_id, a.username "
+        "FROM sessions s JOIN accounts a ON a.id=s.user_id "
+        "WHERE s.expires_at>? ORDER BY a.username, s.created_at DESC",
+        (now,)).fetchall()
+    conn.close()
+    groups = {}
+    for r in rows:
+        g = groups.setdefault(r["username"], {"user_id": r["user_id"], "username": r["username"], "sessions": []})
+        g["sessions"].append({
+            "token": r["token"],
+            "created_at": r["created_at"],
+            "expires_at": r["expires_at"],
+            "user_agent": r["user_agent"],
+        })
+    return list(groups.values())
+
+
+def force_logout_session(token, current_token=None):
+    """管理员强制下线任意会话（按 token 全局删除）。不能下线自己当前的会话。"""
+    token = str(token or "").strip()
+    if not token:
+        return None, "缺少会话标识"
+    if token == str(current_token or "").strip():
+        return None, "不能下线当前正在使用的会话"
+    conn = get_accounts_conn()
+    cur = conn.execute("DELETE FROM sessions WHERE token=?", (token,))
+    conn.commit()
+    conn.close()
+    if cur.rowcount == 0:
+        return None, "会话不存在或已过期"
     return True, None
