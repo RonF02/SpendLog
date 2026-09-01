@@ -100,11 +100,6 @@
         <button class="btn" onclick="doAddUser()">创建账户</button>
       </div>
     </div>
-    <div class="card">
-      <h2>会话管理</h2>
-      <div class="note">按用户查看全部有效登录会话，可强制下线</div>
-      <div id="admin-session-list"></div>
-    </div>
   </section>
 </div>
 
@@ -126,6 +121,11 @@
       <p class="note">查看已登录设备，可强制下线（如某台手机丢失）</p>
       <div id="session-list"></div>
     </div>
+  </div>
+  <div id="drawer-admin-sessions" class="drawer-section" style="display:none">
+    <h2>用户会话管理</h2>
+    <p class="note">按用户查看全部有效登录会话，可强制下线</p>
+    <div id="admin-session-list"></div>
   </div>
   <button class="mini-btn danger drawer-logout" onclick="doLogout()">退出登录</button>
 </div>
@@ -253,7 +253,12 @@ function toggleDrawer(open){
   if(show){
     const u = currentUser();
     if(u) $('drawer-user').textContent = u.username + (u.is_admin ? ' · 管理员' : '');
+    const adminBox = $('drawer-admin-sessions');
+    const userSections = $('drawer-user-sections');
+    if(adminBox) adminBox.style.display = (u && u.is_admin) ? 'block' : 'none';
+    if(userSections) userSections.style.display = (u && !u.is_admin) ? 'block' : 'none';
     if(u && !u.is_admin){ loadBackupInfo(); loadSessions('session-list'); }
+    if(u && u.is_admin){ loadAdminSessions(); }
   }
 }
 
