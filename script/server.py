@@ -6,6 +6,7 @@
   categories / records / statistics   —— 各 API 处理
   db                                  —— 数据库连接与初始化
 """
+import argparse
 import json
 import os
 import re
@@ -26,7 +27,14 @@ from statistics import get_statistics, get_report
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # 项目根目录（本文件位于 script/）
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 HOST = "0.0.0.0"
-PORT = 8080
+DEFAULT_PORT = 8080
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="SpendLog 个人记账服务")
+    parser.add_argument("--port", type=int, default=DEFAULT_PORT,
+                        help="监听端口（默认 {}）".format(DEFAULT_PORT))
+    return parser.parse_args()
 
 
 def json_response(handler, data, status=200):
@@ -348,11 +356,12 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
+    args = parse_args()
     init_db()
     ensure_admin()
-    server = ThreadingHTTPServer((HOST, PORT), Handler)
-    print("SpendLog demo running at http://{}:{}/  ".format(HOST, PORT))
-    print("手机访问请使用电脑局域网 IP，例如 http://<局域网IP>:8080/")
+    server = ThreadingHTTPServer((HOST, args.port), Handler)
+    print("SpendLog demo running at http://{}:{}/  ".format(HOST, args.port))
+    print("手机访问请使用电脑局域网 IP，例如 http://<局域网IP>:{}/".format(args.port))
     try:
         server.serve_forever()
     except KeyboardInterrupt:

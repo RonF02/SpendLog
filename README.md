@@ -30,14 +30,17 @@
 ## 快速开始（本地运行）
 
 ```bash
-# 启动服务（监听 0.0.0.0:8080）
+# 启动服务（默认监听 0.0.0.0:8080）
 python script/server.py
+
+# 指定端口启动（例如 9000）
+python script/server.py --port 9000
 ```
 
 启动后：
 
-- 电脑浏览器访问：`http://127.0.0.1:8080/`
-- 手机浏览器访问（需与电脑同一局域网）：`http://<电脑局域网IP>:8080/`
+- 电脑浏览器访问：`http://127.0.0.1:<端口>/`（默认端口为 8080）
+- 手机浏览器访问（需与电脑同一局域网）：`http://<电脑局域网IP>:<端口>/`
 
 首次登录使用内置管理员：**账号 `admin` / 密码 `admin`**，登录后请尽快在「修改密码」中改掉。
 
@@ -50,16 +53,20 @@ python script/server.py
 - 安装 Python 3.7+，并确认 `python` 可用（Windows 下可在 `cmd` 中运行 `python --version` 验证）。
 - 将整个项目目录复制/克隆到服务器，例如 `C:\SpendLog`（Windows）或 `/opt/spendlog`（Linux）。
 - 目录无需预建 `data/`，首次启动会自动创建。
+- 服务默认使用 **8080 端口**；如需改端口，用 `--port` 参数启动，并在下文各步骤中把 `8080` 替换为实际端口。
 
 ### 2. 启动服务
 
 ```bash
-python script/server.py
+python script/server.py            # 默认 8080
+python script/server.py --port 9000  # 自定义端口
 ```
 
-看到输出 `SpendLog demo running at http://0.0.0.0:8080/` 即启动成功。
+看到输出 `SpendLog demo running at http://0.0.0.0:<端口>/` 即启动成功。
 
 ### 3. 防火墙放行端口
+
+按实际监听端口放行（下面以默认 8080 为例，如改端口请替换）：
 
 **Windows：**
 
@@ -83,7 +90,7 @@ sudo ufw allow 8080/tcp
 
 ### 4. 访问与验证
 
-- 本机访问 `http://127.0.0.1:8080/` 确认页面可打开。
+- 本机访问 `http://127.0.0.1:8080/` 确认页面可打开（自定义端口则用对应端口）。
 - 查看服务器局域网 IP：Windows `ipconfig` 中找 IPv4；Linux `ip addr` 或 `hostname -I`。
 - 手机连同一局域网，访问 `http://<服务器IP>:8080/`。
 - 用 `admin` / `admin` 登录，修改初始密码；也可自行注册普通账户。
@@ -94,7 +101,7 @@ sudo ufw allow 8080/tcp
 
 **Windows（使用任务计划程序实现开机自启）：**
 
-1. 新建启动脚本 `start.bat`（放在项目目录）：
+1. 新建启动脚本 `start.bat`（放在项目目录，如需自定义端口改为 `python script/server.py --port 9000`）：
 
 ```bat
 @echo off
@@ -110,7 +117,7 @@ python script/server.py
 
 **Linux（使用 systemd）：**
 
-新建服务文件 `/etc/systemd/system/spendlog.service`：
+新建服务文件 `/etc/systemd/system/spendlog.service`（如需自定义端口，在 `ExecStart` 末尾加 `--port 9000`）：
 
 ```ini
 [Unit]
