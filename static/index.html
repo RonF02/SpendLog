@@ -7,8 +7,26 @@
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
+<div class="login-overlay" id="login-overlay">
+  <div class="login-card">
+    <h2 id="login-title">个人记账 · 登录</h2>
+    <input id="u-name" placeholder="用户名（3-20 字符，支持中文）">
+    <input id="u-pass" type="password" placeholder="密码（至少 6 位）">
+    <input id="u-pass2" type="password" placeholder="确认密码" style="display:none">
+    <button class="btn" id="login-btn" onclick="doAuth()">登 录</button>
+    <div class="login-sub">
+      <span id="login-msg" class="note"></span>
+      <span onclick="toggleAuthMode()" id="login-toggle">首次使用？注册账号</span>
+    </div>
+  </div>
+</div>
 <div class="app">
-  <header><h1>个人记账</h1></header>
+  <header>
+    <div class="hdr">
+      <h1>个人记账</h1>
+      <div class="hdr-right"><span id="user-name"></span><a onclick="doLogout()">退出</a></div>
+    </div>
+  </header>
 
   <section id="page-add" class="active">
     <div class="card">
@@ -61,11 +79,19 @@
       <div id="s-report" style="display:none;margin-top:4px"></div>
     </div>
   </section>
+
+  <section id="page-admin">
+    <div class="card">
+      <h2>管理员</h2>
+      <p class="note">管理员管理界面（占位）· 即将上线</p>
+    </div>
+  </section>
 </div>
 
 <div class="tabbar">
   <div id="tab-add" class="active" onclick="switchPage('add')">记一笔</div>
   <div id="tab-stat" onclick="switchPage('stat')">统计</div>
+  <div id="tab-admin" onclick="switchPage('admin')" style="display:none">管理</div>
 </div>
 <div id="toast"></div>
 
@@ -85,10 +111,72 @@ function toast(msg, ok){
 }
 
 async function api(path, opts){
+  opts = opts || {};
+  opts.headers = opts.headers || {};
+  const token = localStorage.getItem('token');
+  if(token) opts.headers['Authorization'] = 'Bearer '+token;
   const r = await fetch(path, opts);
   const j = await r.json();
+  if(r.status===401 && path.indexOf('/api/auth/')!==0){
+    localStorage.removeItem('token');
+    showLogin(); 
+    throw new Error(j.message || '未登录或登录已过期');
+  }
   if(!r.ok) throw new Error(j.message || '请求失败');
   return j;
+}
+
+// ---- 登录 / 注册 ----
+let authMode = 'login';
+function showLogin(){ $('login-overlay').style.display='flex'; }
+function hideLogin(){ $('login-overlay').style.display='none'; }
+function toastLogin(msg){ $('login-msg').textContent = msg; }
+
+function toggleAuthMode(){
+  authMode = authMode==='login' ? 'register' : 'login';
+  const isReg = authMode==='register';
+  $('u-pass2').style.display = isReg ? 'block' : 'none';
+  $('login-title').textContent = isReg ? '个人记账 · 注册' : '个人记账 · 登录';
+  $('login-btn').textContent = isReg ? '注 册' : '登 录';
+  $('login-toggle').textContent = isReg ? '已有账号？去登录' : '首次使用？注册账号';
+  toastLogin('');
+}
+
+async function doAuth(){
+  const username = $('u-name').value.trim();
+  const password = $('u-pass').value;
+  toastLogin('');
+  if(!username || !password){ toastLogin('请输入用户名和密码'); return; }
+  if(authMode==='register'){
+    const confirm = $('u-pass2').value;
+    if(!confirm || confirm!==password){ toastLogin('两次输入的密码不一致'); return; }
+    try{
+      await api('/api/auth/register', { method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ username, password, confirm_password: confirm }) });
+      toastLogin('注册成功，请登录');
+      toggleAuthMode();
+    }catch(e){ toastLogin(e.message); }
+    return;
+  }
+  try{
+    const j = await api('/api/auth/login', { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ username, password }) });
+    localStorage.setItem('token', j.data.token);
+    localStorage.setItem('user', JSON.stringify(j.data.user));
+    hideLogin();
+    await startApp();
+  }catch(e){ toastLogin(e.message); }
+}
+
+async function doLogout(){
+  try{ await api('/api/auth/logout', { method:'POST' }); }catch(e){}
+  localStorage.removeItem('token');
+  localStorage.removeItem('user');
+  showLogin();
+}
+
+function currentUser(){
+  try{ return JSON.parse(localStorage.getItem('user') || 'null'); }catch(e){ return null; }
 }
 
 function fmt(n){
@@ -98,8 +186,10 @@ function fmt(n){
 function switchPage(name){
   $('page-add').classList.toggle('active', name==='add');
   $('page-stat').classList.toggle('active', name==='stat');
+  $('page-admin').classList.toggle('active', name==='admin');
   $('tab-add').classList.toggle('active', name==='add');
   $('tab-stat').classList.toggle('active', name==='stat');
+  $('tab-admin').classList.toggle('active', name==='admin');
   if(name==='stat') loadStat();
 }
 
@@ -311,7 +401,25 @@ function shiftMonth(delta){
 // 初始化
 $('f-date').value = new Date().toISOString().slice(0,10);
 $('f-month').value = new Date().toISOString().slice(0,7);
-loadCategories().catch(e=>toast(e.message));
+
+async function startApp(){
+  hideLogin();
+  const u = currentUser();
+  $('user-name').textContent = u ? (u.username + (u.is_admin ? ' · 管理员' : '')) : '';
+  $('tab-admin').style.display = (u && u.is_admin) ? 'block' : 'none';
+  if(u && !u.is_admin) switchPage('add');
+  await loadCategories().catch(e=>toast(e.message));
+}
+
+(async function initAuth(){
+  const u = currentUser();
+  if(!localStorage.getItem('token') || !u){ showLogin(); return; }
+  try{
+    const me = await api('/api/auth/me');
+    localStorage.setItem('user', JSON.stringify(me.data));
+    await startApp();
+  }catch(e){ showLogin(); }
+})();
 </script>
 </body>
 </html>

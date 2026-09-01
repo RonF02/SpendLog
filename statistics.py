@@ -2,7 +2,7 @@
 """统计与完整报表。"""
 import calendar
 
-from db import get_conn
+from db import get_user_conn
 
 
 def _month_range(month):
@@ -12,8 +12,8 @@ def _month_range(month):
     return start, end
 
 
-def get_statistics(month):
-    conn = get_conn()
+def get_statistics(uid, month):
+    conn = get_user_conn(uid)
     start, end = _month_range(month)
 
     income = conn.execute(
@@ -81,9 +81,9 @@ def get_statistics(month):
     }
 
 
-def get_report(month):
+def get_report(uid, month):
     """完整报表：当月每笔明细（含备注与支付方式）。"""
-    conn = get_conn()
+    conn = get_user_conn(uid)
     start, end = _month_range(month)
     rows = conn.execute(
         "SELECT r.date, r.amount, r.note, r.payment, "

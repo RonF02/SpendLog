@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 """分类字典相关：分类树、增删分类、按 code 查 id。"""
-from db import get_conn
+from db import get_user_conn
 
 
-def build_category_tree():
-    conn = get_conn()
+def build_category_tree(uid):
+    conn = get_user_conn(uid)
     rows = conn.execute(
         "SELECT id, code, name, parent_id, type FROM categories").fetchall()
     used_ids = {r[0] for r in conn.execute("SELECT DISTINCT category_id FROM records")}
@@ -35,13 +35,13 @@ def find_category_id(conn, code):
     return row["id"] if row else None
 
 
-def add_category(payload):
+def add_category(uid, payload):
     name = str(payload.get("name", "")).strip()
     code = str(payload.get("code", "")).strip()
     parent_code = str(payload.get("parent_code") or "").strip() or None
     if not (name and code):
         return None, "名称与标识不能为空"
-    conn = get_conn()
+    conn = get_user_conn(uid)
     if conn.execute("SELECT 1 FROM categories WHERE code=?", (code,)).fetchone():
         conn.close()
         return None, "该标识已存在：{}".format(code)
@@ -64,11 +64,11 @@ def add_category(payload):
     return {"code": code, "name": name, "parent_code": parent_code}, None
 
 
-def delete_category(code):
+def delete_category(uid, code):
     code = str(code or "").strip()
     if not code:
         return None, "缺少分类标识"
-    conn = get_conn()
+    conn = get_user_conn(uid)
     row = conn.execute(
         "SELECT id, parent_id, type FROM categories WHERE code=?",
         (code,)).fetchone()

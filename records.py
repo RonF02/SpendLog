@@ -4,11 +4,11 @@ import re
 import uuid
 from datetime import datetime
 
-from db import get_conn
+from db import get_user_conn
 from categories import find_category_id
 
 
-def add_record(payload):
+def add_record(uid, payload):
     date = str(payload.get("date", "")).strip()
     if not re.match(r"^\d{4}-\d{2}-\d{2}$", date):
         return None, "日期格式应为 YYYY-MM-DD"
@@ -20,7 +20,7 @@ def add_record(payload):
     note = str(payload.get("note", "")).strip()
     payment = str(payload.get("payment", "")).strip()
 
-    conn = get_conn()
+    conn = get_user_conn(uid)
     cid = find_category_id(conn, code)
     if cid is None:
         conn.close()

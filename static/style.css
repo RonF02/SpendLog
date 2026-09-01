@@ -43,3 +43,12 @@ input,select{width:100%;padding:12px;font-size:16px;border:1px solid #e3e6ee;bor
 .month button{border:none;background:var(--card);border-radius:8px;padding:8px 12px;font-size:16px;cursor:pointer;}
 h2{font-size:16px;margin:14px 4px 4px;}
 #toast{position:fixed;bottom:110px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.75);color:#fff;padding:10px 18px;border-radius:20px;font-size:14px;display:none;white-space:nowrap;}
+.hdr{display:flex;align-items:center;justify-content:space-between;}
+.hdr-right{color:rgba(255,255,255,.85);font-size:13px;display:flex;align-items:center;gap:10px;}
+.hdr-right a{color:#fff;text-decoration:underline;cursor:pointer;}
+.login-overlay{position:fixed;inset:0;background:var(--bg);display:none;align-items:center;justify-content:center;z-index:100;padding:20px;}
+.login-card{background:var(--card);border-radius:16px;padding:26px 22px;width:100%;max-width:360px;box-shadow:0 4px 16px rgba(0,0,0,.08);text-align:center;}
+.login-card h2{margin:0 0 18px;font-size:20px;color:var(--main);}
+.login-card input{margin-bottom:12px;}
+.login-sub{margin-top:12px;display:flex;flex-direction:column;gap:8px;align-items:center;font-size:13px;}
+.login-sub span{cursor:pointer;color:var(--main);}
