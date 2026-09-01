@@ -6,9 +6,10 @@
 - admin.py 负责用户列表 / 重置密码 / 禁用启用 / 删除用户 / 修改密码
 """
 import hmac
+import os
 
 from auth import _hash_password, invalidate_sessions
-from db import get_accounts_conn, get_user_conn, delete_user_db
+from db import get_accounts_conn, get_user_conn, delete_user_db, user_db_path
 
 
 def _record_count(uid):
@@ -19,6 +20,14 @@ def _record_count(uid):
         conn.close()
         return n
     except Exception:
+        return 0
+
+
+def _db_size(uid):
+    """指定用户业务库文件在磁盘上的占用字节数（库不存在返回 0）。"""
+    try:
+        return os.path.getsize(user_db_path(uid))
+    except OSError:
         return 0
 
 
@@ -36,6 +45,7 @@ def list_users():
         "created_at": r["created_at"],
         "last_login": r["last_login"],
         "record_count": _record_count(r["id"]),
+        "db_size": _db_size(r["id"]),
     } for r in rows]
 
 

@@ -1,6 +1,27 @@
 # -*- coding: utf-8 -*-
 """分类字典相关：分类树、增删分类、按 code 查 id。"""
+import hashlib
+import re
+
 from db import get_user_conn
+
+
+def make_code(name, taken):
+    """由名称生成稳定且唯一的分类 code（同名称恒同 code）。
+
+    优先保留 ASCII 字母/数字并小写化；若为空（如纯中文名），
+    退化为固定前缀 + 名称哈希，保证稳定且几乎唯一。
+    """
+    base = re.sub(r"[^a-zA-Z0-9]+", "_", name).strip("_").lower()
+    if not base:
+        base = "cat_" + hashlib.md5(name.encode("utf-8")).hexdigest()[:8]
+    base = base[:32]
+    code = base
+    i = 1
+    while code in taken:
+        i += 1
+        code = "{}_{}".format(base, i)
+    return code
 
 
 def build_category_tree(uid):
@@ -37,11 +58,15 @@ def find_category_id(conn, code):
 
 def add_category(uid, payload):
     name = str(payload.get("name", "")).strip()
-    code = str(payload.get("code", "")).strip()
     parent_code = str(payload.get("parent_code") or "").strip() or None
-    if not (name and code):
-        return None, "名称与标识不能为空"
+    if not name:
+        return None, "名称不能为空"
     conn = get_user_conn(uid)
+    # 标识未提供时自动哈希生成；提供则沿用（供导入等内部使用）
+    code = str(payload.get("code", "")).strip()
+    if not code:
+        taken = {r[0] for r in conn.execute("SELECT code FROM categories")}
+        code = make_code(name, taken)
     if conn.execute("SELECT 1 FROM categories WHERE code=?", (code,)).fetchone():
         conn.close()
         return None, "该标识已存在：{}".format(code)

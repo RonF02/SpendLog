@@ -41,7 +41,6 @@
       <div class="addbar" onclick="toggleMainAdd()">＋ 新增分类标签</div>
       <div class="addform" id="addm" style="display:none">
         <input id="m-name" placeholder="名称，如：餐饮">
-        <input id="m-code" placeholder="标识（英文唯一），如：food">
         <button class="mini-btn" onclick="doAddMain()">添加一级</button>
       </div>
       <div class="label" style="margin-top:8px">二级分类</div>
@@ -49,12 +48,18 @@
       <div class="addbar" onclick="toggleSubAdd()">＋ 新增二级标签</div>
       <div class="addform" id="adds" style="display:none">
         <input id="s-name" placeholder="名称，如：晚餐">
-        <input id="s-code" placeholder="标识（英文唯一），如：dinner">
         <button class="mini-btn" onclick="doAddSub()">添加二级</button>
       </div>
       <div class="label" style="margin-top:12px">备注</div>
       <input id="f-note" type="text" placeholder="选填">
       <button class="btn" onclick="submitRecord()">保存</button>
+    </div>
+
+    <div class="card" id="backup-card" style="display:none">
+      <h2>数据备份</h2>
+      <div class="note" id="backup-info">正在读取…</div>
+      <button class="btn" onclick="exportData()">导出 Excel</button>
+      <label class="btn filebtn">导入 Excel<input id="f-import" type="file" accept=".xlsx" onchange="importData(this)"></label>
     </div>
   </section>
 
@@ -192,6 +197,11 @@ function fmt(n){
   return (Math.round((n||0)*100)/100).toLocaleString('zh-CN');
 }
 
+function fmtKb(bytes){
+  const kb = (bytes||0)/1024;
+  return kb >= 1024 ? (kb/1024).toFixed(1)+' MB' : kb.toFixed(1)+' KB';
+}
+
 function switchPage(name){
   $('page-add').classList.toggle('active', name==='add');
   $('page-stat').classList.toggle('active', name==='stat');
@@ -217,12 +227,11 @@ function toggleSubAdd(){ $('adds').style.display = $('adds').style.display==='no
 
 async function doAddMain(){
   const name = $('m-name').value.trim();
-  const code = $('m-code').value.trim();
-  if(!name || !code){ toast('请填写名称和标识'); return; }
+  if(!name){ toast('请输入名称'); return; }
   try{
     await api('/api/categories', { method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ name, code }) });
-    $('m-name').value=''; $('m-code').value=''; $('addm').style.display='none';
+      body: JSON.stringify({ name }) });
+    $('m-name').value=''; $('addm').style.display='none';
     await loadCategories();
     toast('已添加一级分类', true);
   }catch(e){ toast(e.message); }
@@ -231,12 +240,11 @@ async function doAddMain(){
 async function doAddSub(){
   if(!curMain){ toast('请先选择一级分类'); return; }
   const name = $('s-name').value.trim();
-  const code = $('s-code').value.trim();
-  if(!name || !code){ toast('请填写名称和标识'); return; }
+  if(!name){ toast('请输入名称'); return; }
   try{
     await api('/api/categories', { method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ name, code, parent_code: curMain }) });
-    $('s-name').value=''; $('s-code').value=''; $('adds').style.display='none';
+      body: JSON.stringify({ name, parent_code: curMain }) });
+    $('s-name').value=''; $('adds').style.display='none';
     await loadCategories();
     selectMain(curMain);
     toast('已添加二级分类', true);
@@ -356,6 +364,53 @@ async function submitRecord(){
   }catch(e){ toast(e.message); }
 }
 
+// ---- 数据备份 ----
+async function loadBackupInfo(){
+  const el = $('backup-info');
+  try{
+    const j = await api('/api/backup/info');
+    const kb = (j.data.export_size/1024).toFixed(1);
+    el.textContent = `共 ${j.data.record_count} 条记录 · 导出文件约 ${kb} KB`;
+  }catch(e){ el.textContent = e.message; }
+}
+
+function exportData(){
+  const token = localStorage.getItem('token');
+  const date = new Date().toISOString().slice(0,10).replace(/-/g,'');
+  fetch('/api/export', { headers:{'Authorization':'Bearer '+token} })
+    .then(r=>{ if(!r.ok){ toast('导出失败'); throw new Error(); } return r.blob(); })
+    .then(blob=>{
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `记账备份_${date}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast('已导出', true);
+    })
+    .catch(()=>{});
+}
+
+async function importData(input){
+  const file = input.files && input.files[0];
+  if(!file) return;
+  const fd = new FormData();
+  fd.append('file', file);
+  try{
+    const j = await api('/api/import', { method:'POST', body: fd });
+    const d = j.data || {};
+    let msg = `已导入 ${d.added} 条记录`;
+    if(d.created_categories) msg += `，自动新建 ${d.created_categories} 个分类`;
+    if(d.skipped_existing) msg += `，跳过重复 ${d.skipped_existing} 条`;
+    toast(msg, true);
+  }catch(e){ toast(e.message); }
+  input.value = '';
+  loadCategories().catch(()=>{});
+  loadBackupInfo();
+}
+
 let curReportMonth = null;
 
 async function loadStat(){
@@ -423,7 +478,8 @@ function renderUsers(users){
   users.forEach(u=>{
     const created = (u.created_at||'').slice(0,10);
     const last = u.last_login ? (' · 最近登录 ' + u.last_login.slice(0,16)) : '';
-    const meta = `注册 ${created} · ${u.record_count} 条记录${last}`;
+    const dbSize = u.db_size ? (' · 数据 ' + fmtKb(u.db_size)) : '';
+    const meta = `注册 ${created} · ${u.record_count} 条记录${dbSize}${last}`;
     const row = document.createElement('div');
     row.className = 'user-row';
     row.innerHTML = `
@@ -509,7 +565,11 @@ async function startApp(){
   $('tab-add').style.display = isAdmin ? 'none' : 'block';
   $('tab-stat').style.display = isAdmin ? 'none' : 'block';
   if(isAdmin) switchPage('admin');
-  else switchPage('add');
+  else{
+    switchPage('add');
+    $('backup-card').style.display = 'block';
+    loadBackupInfo();
+  }
   if(!isAdmin) await loadCategories().catch(e=>toast(e.message));
 }
 
