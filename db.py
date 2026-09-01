@@ -60,6 +60,8 @@ def _init_accounts():
             token TEXT PRIMARY KEY,
             user_id INTEGER NOT NULL,
             expires_at TEXT NOT NULL,
+            created_at TEXT,
+            user_agent TEXT,
             FOREIGN KEY (user_id) REFERENCES accounts(id)
         );
     """)
@@ -75,6 +77,12 @@ def _migrate_accounts(conn):
         conn.execute("ALTER TABLE accounts ADD COLUMN disabled INTEGER NOT NULL DEFAULT 0")
     if "last_login" not in cols:
         conn.execute("ALTER TABLE accounts ADD COLUMN last_login TEXT")
+    # sessions 老库补列：created_at（签发时间）、user_agent（设备标识）
+    scols = {r["name"] for r in conn.execute("PRAGMA table_info(sessions)")}
+    if "created_at" not in scols:
+        conn.execute("ALTER TABLE sessions ADD COLUMN created_at TEXT")
+    if "user_agent" not in scols:
+        conn.execute("ALTER TABLE sessions ADD COLUMN user_agent TEXT")
 
 
 def init_user_db(uid):
