@@ -24,7 +24,7 @@
   <header>
     <div class="hdr">
       <h1>个人记账</h1>
-      <div class="hdr-right"><span id="user-name"></span><a onclick="doLogout()">退出</a></div>
+      <div class="hdr-right"><span id="user-name"></span><button class="hamburger" onclick="toggleDrawer(true)" aria-label="菜单">&#9776;</button></div>
     </div>
   </header>
 
@@ -53,19 +53,6 @@
       <div class="label" style="margin-top:12px">备注</div>
       <input id="f-note" type="text" placeholder="选填">
       <button class="btn" onclick="submitRecord()">保存</button>
-    </div>
-
-    <div class="card" id="backup-card" style="display:none">
-      <h2>数据备份</h2>
-      <div class="note" id="backup-info">正在读取…</div>
-      <button class="btn" onclick="exportData()">导出 Excel</button>
-      <label class="btn filebtn">导入 Excel<input id="f-import" type="file" accept=".xlsx" onchange="importData(this)"></label>
-    </div>
-
-    <div class="card" id="session-card" style="display:none">
-      <h2>会话管理</h2>
-      <div class="note">查看已登录设备，可强制下线（如某台手机丢失）</div>
-      <div id="session-list"></div>
     </div>
   </section>
 
@@ -119,6 +106,28 @@
       <div id="admin-session-list"></div>
     </div>
   </section>
+</div>
+
+<div class="drawer-mask" id="drawer-mask" onclick="toggleDrawer(false)"></div>
+<div class="drawer" id="drawer">
+  <div class="drawer-head">
+    <span id="drawer-user"></span>
+    <span class="drawer-close" onclick="toggleDrawer(false)">&#10005;</span>
+  </div>
+  <div id="drawer-user-sections">
+    <div class="drawer-section">
+      <h2>数据备份</h2>
+      <p class="note" id="backup-info">正在读取…</p>
+      <label class="btn filebtn">导入 Excel<input id="f-import" type="file" accept=".xlsx" onchange="importData(this)"></label>
+      <button class="btn" onclick="exportData()">导出 Excel</button>
+    </div>
+    <div class="drawer-section">
+      <h2>会话管理</h2>
+      <p class="note">查看已登录设备，可强制下线（如某台手机丢失）</p>
+      <div id="session-list"></div>
+    </div>
+  </div>
+  <button class="mini-btn danger drawer-logout" onclick="doLogout()">退出登录</button>
 </div>
 
 <div class="tabbar">
@@ -202,6 +211,7 @@ async function doAuth(){
 }
 
 async function doLogout(){
+  toggleDrawer(false);
   try{ await api('/api/auth/logout', { method:'POST' }); }catch(e){}
   localStorage.removeItem('token');
   localStorage.removeItem('user');
@@ -210,6 +220,21 @@ async function doLogout(){
 
 function currentUser(){
   try{ return JSON.parse(localStorage.getItem('user') || 'null'); }catch(e){ return null; }
+}
+
+// 汉堡菜单（抽屉）
+function toggleDrawer(open){
+  const d = $('drawer'), m = $('drawer-mask');
+  if(!d) return;
+  const show = (open === undefined) ? !d.classList.contains('open') : open;
+  d.classList.toggle('open', show);
+  m.classList.toggle('show', show);
+  document.body.style.overflow = show ? 'hidden' : '';
+  if(show){
+    const u = currentUser();
+    if(u) $('drawer-user').textContent = u.username + (u.is_admin ? ' · 管理员' : '');
+    if(u && !u.is_admin){ loadBackupInfo(); loadSessions('session-list'); }
+  }
 }
 
 function fmt(n){
@@ -698,13 +723,8 @@ async function startApp(){
   $('tab-add').style.display = isAdmin ? 'none' : 'block';
   $('tab-stat').style.display = isAdmin ? 'none' : 'block';
   if(isAdmin) switchPage('admin');
-  else{
-    switchPage('add');
-    $('backup-card').style.display = 'block';
-    loadBackupInfo();
-    $('session-card').style.display = 'block';
-    loadSessions('session-list');
-  }
+  else switchPage('add');
+  $('drawer-user-sections').style.display = isAdmin ? 'none' : 'block';
   if(!isAdmin) await loadCategories().catch(e=>toast(e.message));
 }
 
