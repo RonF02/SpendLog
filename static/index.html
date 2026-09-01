@@ -24,7 +24,7 @@
   <header>
     <div class="hdr">
       <h1>个人记账</h1>
-      <div class="hdr-right"><span id="user-name"></span><a onclick="doLogout()">退出</a></div>
+      <div class="hdr-right"><span id="user-name"></span><button class="hamburger" onclick="toggleDrawer(true)" aria-label="菜单">&#9776;</button></div>
     </div>
   </header>
 
@@ -53,13 +53,6 @@
       <div class="label" style="margin-top:12px">备注</div>
       <input id="f-note" type="text" placeholder="选填">
       <button class="btn" onclick="submitRecord()">保存</button>
-    </div>
-
-    <div class="card" id="backup-card" style="display:none">
-      <h2>数据备份</h2>
-      <div class="note" id="backup-info">正在读取…</div>
-      <button class="btn" onclick="exportData()">导出 Excel</button>
-      <label class="btn filebtn">导入 Excel<input id="f-import" type="file" accept=".xlsx" onchange="importData(this)"></label>
     </div>
   </section>
 
@@ -99,7 +92,42 @@
       <h2>用户管理</h2>
       <div id="admin-users"></div>
     </div>
+    <div class="card">
+      <h2>新增账户</h2>
+      <div class="pw-form">
+        <input id="au-name" placeholder="用户名（3-20 字符）">
+        <input id="au-pass" type="password" placeholder="初始密码（至少 6 位）">
+        <button class="btn" onclick="doAddUser()">创建账户</button>
+      </div>
+    </div>
   </section>
+</div>
+
+<div class="drawer-mask" id="drawer-mask" onclick="toggleDrawer(false)"></div>
+<div class="drawer" id="drawer">
+  <div class="drawer-head">
+    <span id="drawer-user"></span>
+    <span class="drawer-close" onclick="toggleDrawer(false)">&#10005;</span>
+  </div>
+  <div id="drawer-user-sections">
+    <div class="drawer-section">
+      <h2>数据备份</h2>
+      <p class="note" id="backup-info">正在读取…</p>
+      <label class="btn filebtn">导入 Excel<input id="f-import" type="file" accept=".xlsx" onchange="importData(this)"></label>
+      <button class="btn" onclick="exportData()">导出 Excel</button>
+    </div>
+    <div class="drawer-section">
+      <h2>会话管理</h2>
+      <p class="note">查看已登录设备，可强制下线（如某台手机丢失）</p>
+      <div id="session-list"></div>
+    </div>
+  </div>
+  <div id="drawer-admin-sessions" class="drawer-section" style="display:none">
+    <h2>用户会话管理</h2>
+    <p class="note">按用户查看全部有效登录会话，可强制下线</p>
+    <div id="admin-session-list"></div>
+  </div>
+  <button class="mini-btn danger drawer-logout" onclick="doLogout()">退出登录</button>
 </div>
 
 <div class="tabbar">
@@ -183,14 +211,55 @@ async function doAuth(){
 }
 
 async function doLogout(){
+  toggleDrawer(false);
   try{ await api('/api/auth/logout', { method:'POST' }); }catch(e){}
   localStorage.removeItem('token');
   localStorage.removeItem('user');
   showLogin();
 }
 
+// 登录回车：电脑端等同点击登录，手机端收起键盘
+function isTouchDevice(){
+  try{
+    return window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+  }catch(e){ return false; }
+}
+function bindLoginEnter(){
+  ['u-name', 'u-pass', 'u-pass2'].forEach(id=>{
+    const el = $(id);
+    if(!el) return;
+    el.addEventListener('keydown', e=>{
+      if(e.key !== 'Enter') return;
+      e.preventDefault();
+      if(isTouchDevice()){ el.blur(); }
+      else doAuth();
+    });
+  });
+}
+bindLoginEnter();
+
 function currentUser(){
   try{ return JSON.parse(localStorage.getItem('user') || 'null'); }catch(e){ return null; }
+}
+
+// 汉堡菜单（抽屉）
+function toggleDrawer(open){
+  const d = $('drawer'), m = $('drawer-mask');
+  if(!d) return;
+  const show = (open === undefined) ? !d.classList.contains('open') : open;
+  d.classList.toggle('open', show);
+  m.classList.toggle('show', show);
+  document.body.style.overflow = show ? 'hidden' : '';
+  if(show){
+    const u = currentUser();
+    if(u) $('drawer-user').textContent = u.username + (u.is_admin ? ' · 管理员' : '');
+    const adminBox = $('drawer-admin-sessions');
+    const userSections = $('drawer-user-sections');
+    if(adminBox) adminBox.style.display = (u && u.is_admin) ? 'block' : 'none';
+    if(userSections) userSections.style.display = (u && !u.is_admin) ? 'block' : 'none';
+    if(u && !u.is_admin){ loadBackupInfo(); loadSessions('session-list'); }
+    if(u && u.is_admin){ loadAdminSessions(); }
+  }
 }
 
 function fmt(n){
@@ -468,6 +537,51 @@ async function loadAdmin(){
   try{
     const j = await api('/api/admin/users');
     renderUsers(j.data);
+    loadAdminSessions();
+  }catch(e){ toast(e.message); }
+}
+
+function loadAdminSessions(){
+  const box = $('admin-session-list');
+  if(!box) return;
+  const curToken = localStorage.getItem('token');
+  api('/api/admin/sessions').then(j=>{
+    const groups = j.data || [];
+    if(!groups.length){ box.innerHTML = '<span class="note">当前无有效登录会话</span>'; return; }
+    box.innerHTML = '';
+    groups.forEach(g=>{
+      const head = document.createElement('div');
+      head.className = 'u-name';
+      head.style.marginTop = '10px';
+      head.textContent = g.username + (g.user_id===0 ? '（管理员）' : '');
+      box.appendChild(head);
+      g.sessions.forEach(s=>{
+        const isCur = s.token === curToken;
+        const dev = (s.user_agent ? deviceLabel(s.user_agent) : '设备') + ' · ' + s.token.slice(0, 8) + '…';
+        const created = s.created_at ? s.created_at.slice(0, 16) : '';
+        const expires = s.expires_at ? s.expires_at.slice(0, 16) : '';
+        const row = document.createElement('div');
+        row.className = 'user-row';
+        row.innerHTML = `
+          <div class="u-name">${dev}${isCur ? '<span class="tag">当前</span>' : ''}</div>
+          <div class="u-meta">登录 ${created} · 过期 ${expires}</div>
+          <div class="u-actions">
+            ${isCur ? '<button class="mini-btn" disabled style="opacity:.4">当前使用</button>'
+                    : `<button class="mini-btn danger" onclick="forceLogoutAdmin('${s.token}')">强制下线</button>`}
+          </div>`;
+        box.appendChild(row);
+      });
+    });
+  }).catch(()=>{ box.innerHTML = '<span class="note">读取失败</span>'; });
+}
+
+async function forceLogoutAdmin(token){
+  if(!confirm('确定强制下线该会话？')) return;
+  try{
+    await api('/api/admin/sessions/revoke', { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ token }) });
+    toast('已强制下线', true);
+    loadAdminSessions();
   }catch(e){ toast(e.message); }
 }
 
@@ -552,6 +666,75 @@ async function doChangePassword(){
   }catch(e){ toast(e.message); }
 }
 
+// 会话管理 / 管理员新增账户
+function deviceLabel(ua){
+  ua = ua || '';
+  const name =
+    /MicroMessenger/i.test(ua) ? '微信内置浏览器' :
+    /iPhone|iPad|iPod/i.test(ua) ? 'iOS 设备' :
+    /Android/i.test(ua) ? 'Android 设备' :
+    /Edg/i.test(ua) ? 'Edge' :
+    /Firefox/i.test(ua) ? 'Firefox' :
+    /Chrome/i.test(ua) ? 'Chrome' :
+    /Safari/i.test(ua) ? 'Safari' : '';
+  return name || (ua.slice(0, 40) || '未知设备');
+}
+
+async function loadSessions(boxId){
+  const box = $(boxId);
+  if(!box) return;
+  let list = [];
+  try{
+    const j = await api('/api/sessions');
+    list = j.data || [];
+  }catch(e){
+    box.innerHTML = '<span class="note">读取失败</span>';
+    return;
+  }
+  if(!list.length){ box.innerHTML = '<span class="note">当前无有效登录会话</span>'; return; }
+  box.innerHTML = '';
+  list.forEach(s=>{
+    const dev = (s.user_agent ? deviceLabel(s.user_agent) : '设备') + ' · ' + s.token.slice(0, 8) + '…';
+    const created = s.created_at ? s.created_at.slice(0, 16) : '';
+    const expires = s.expires_at ? s.expires_at.slice(0, 16) : '';
+    const row = document.createElement('div');
+    row.className = 'user-row';
+    row.innerHTML = `
+      <div class="u-name">${dev}${s.is_current ? '<span class="tag">当前</span>' : ''}</div>
+      <div class="u-meta">登录 ${created} · 过期 ${expires}</div>
+      <div class="u-actions">
+        ${s.is_current
+          ? '<button class="mini-btn" disabled style="opacity:.4">当前使用</button>'
+          : `<button class="mini-btn danger" onclick="revokeSession('${boxId}','${s.token}')">强制下线</button>`}
+      </div>`;
+    box.appendChild(row);
+  });
+}
+
+async function revokeSession(boxId, token){
+  if(!confirm('确定强制下线该设备？')) return;
+  try{
+    await api('/api/sessions/revoke', { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ token }) });
+    toast('已强制下线', true);
+    loadSessions(boxId);
+  }catch(e){ toast(e.message); }
+}
+
+async function doAddUser(){
+  const name = $('au-name').value.trim();
+  const pass = $('au-pass').value;
+  if(!name || name.length<3 || name.length>20){ toast('用户名需 3-20 个字符'); return; }
+  if(!pass || pass.length<6){ toast('初始密码至少 6 位'); return; }
+  try{
+    await api('/api/admin/users/create', { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ username: name, password: pass }) });
+    $('au-name').value=''; $('au-pass').value='';
+    toast('已创建账户', true);
+    loadAdmin();
+  }catch(e){ toast(e.message); }
+}
+
 // 初始化
 $('f-date').value = new Date().toISOString().slice(0,10);
 $('f-month').value = new Date().toISOString().slice(0,7);
@@ -565,11 +748,8 @@ async function startApp(){
   $('tab-add').style.display = isAdmin ? 'none' : 'block';
   $('tab-stat').style.display = isAdmin ? 'none' : 'block';
   if(isAdmin) switchPage('admin');
-  else{
-    switchPage('add');
-    $('backup-card').style.display = 'block';
-    loadBackupInfo();
-  }
+  else switchPage('add');
+  $('drawer-user-sections').style.display = isAdmin ? 'none' : 'block';
   if(!isAdmin) await loadCategories().catch(e=>toast(e.message));
 }
 

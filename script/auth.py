@@ -45,20 +45,8 @@ def ensure_admin():
     init_user_db(0)  # 管理员的业务库（当前为空）
 
 
-def register(username, password, confirm_password):
-    """注册新用户。自动分配 id（从 1 向上，0 为管理员）。
-
-    成功创建该用户独立的业务库（data/{id}.db）。
-    """
-    username = str(username or "").strip()
-    if not (3 <= len(username) <= 20):
-        return None, "用户名长度需为 3-20 个字符"
-    if not password:
-        return None, "密码不能为空"
-    if password != confirm_password:
-        return None, "两次输入的密码不一致"
-    if len(password) < 6:
-        return None, "密码长度至少 6 位"
+def _insert_account(username, password):
+    """创建账号：用户名唯一性校验 + 入库 + 初始化业务库。不校验口令策略。"""
     conn = get_accounts_conn()
     if conn.execute("SELECT 1 FROM accounts WHERE username=?", (username,)).fetchone():
         conn.close()
@@ -75,8 +63,35 @@ def register(username, password, confirm_password):
     return {"id": uid, "username": username, "is_admin": False}, None
 
 
-def login(username, password):
-    """校验用户名密码，成功签发 token。"""
+def register(username, password, confirm_password):
+    """自助注册新用户。
+
+    成功创建该用户独立的业务库（data/{id}.db）。
+    """
+    username = str(username or "").strip()
+    if not (3 <= len(username) <= 20):
+        return None, "用户名长度需为 3-20 个字符"
+    if not password:
+        return None, "密码不能为空"
+    if password != confirm_password:
+        return None, "两次输入的密码不一致"
+    if len(password) < 6:
+        return None, "密码长度至少 6 位"
+    return _insert_account(username, password)
+
+
+def create_user(username, password):
+    """管理员创建账户（普通用户，无 is_admin）。不做双次确认。"""
+    username = str(username or "").strip()
+    if not (3 <= len(username) <= 20):
+        return None, "用户名长度需为 3-20 个字符"
+    if not password or len(password) < 6:
+        return None, "密码长度至少 6 位"
+    return _insert_account(username, password)
+
+
+def login(username, password, user_agent=None):
+    """校验用户名密码，成功签发 token；user_agent 记录登录设备供会话管理区分。"""
     username = str(username or "").strip()
     conn = get_accounts_conn()
     row = conn.execute(
@@ -93,13 +108,16 @@ def login(username, password):
         conn.close()
         return None, "用户名或密码错误"
     token = secrets.token_urlsafe(32)
-    expires = datetime.now() + timedelta(hours=SESSION_TTL_HOURS)
+    now = datetime.now()
+    expires = now + timedelta(hours=SESSION_TTL_HOURS)
     conn.execute(
-        "INSERT INTO sessions (token, user_id, expires_at) VALUES (?,?,?)",
-        (token, row["id"], expires.isoformat(timespec="seconds")))
+        "INSERT INTO sessions (token, user_id, expires_at, created_at, user_agent) "
+        "VALUES (?,?,?,?,?)",
+        (token, row["id"], expires.isoformat(timespec="seconds"),
+         now.isoformat(timespec="seconds"), (user_agent or "")[:200]))
     conn.execute(
         "UPDATE accounts SET last_login=? WHERE id=?",
-        (datetime.now().isoformat(timespec="seconds"), row["id"]))
+        (now.isoformat(timespec="seconds"), row["id"]))
     conn.commit()
     conn.close()
     return {"token": token, "user": _user_from_row(row)}, None
@@ -131,6 +149,46 @@ def check_auth(token):
     if not row or row["disabled"]:
         return None
     return _user_from_row(row) if row else None
+
+
+def list_sessions(uid, current_token=None):
+    """列出某用户当前有效（未过期）的登录会话，按签发时间倒序。
+
+    返回含设备标识、登录/过期时间，并标记当前正在使用的会话。
+    """
+    now = datetime.now().isoformat(timespec="seconds")
+    conn = get_accounts_conn()
+    rows = conn.execute(
+        "SELECT token, expires_at, created_at, user_agent FROM sessions "
+        "WHERE user_id=? AND expires_at>? ORDER BY created_at DESC",
+        (uid, now)).fetchall()
+    conn.close()
+    current_token = str(current_token or "").strip()
+    return [{
+        "token": r["token"],
+        "is_current": r["token"] == current_token,
+        "created_at": r["created_at"],
+        "expires_at": r["expires_at"],
+        "user_agent": r["user_agent"],
+    } for r in rows]
+
+
+def revoke_session(uid, token, current_token=None):
+    """强制下线指定会话。不能下线当前正在使用的会话。"""
+    token = str(token or "").strip()
+    if not token:
+        return None, "缺少会话标识"
+    if token == str(current_token or "").strip():
+        return None, "不能下线当前正在使用的会话"
+    conn = get_accounts_conn()
+    cur = conn.execute(
+        "DELETE FROM sessions WHERE token=? AND user_id=? AND expires_at>?",
+        (token, uid, datetime.now().isoformat(timespec="seconds")))
+    conn.commit()
+    conn.close()
+    if cur.rowcount == 0:
+        return None, "会话不存在或已过期"
+    return True, None
 
 
 def invalidate_sessions(uid, keep_token=None):

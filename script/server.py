@@ -13,15 +13,18 @@ from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from admin import (list_users, change_password, admin_reset_password,
-                   set_user_disabled, delete_user)
-from auth import ensure_admin, register, login, logout, check_auth
+                   set_user_disabled, delete_user,
+                   list_sessions as admin_list_sessions,
+                   force_logout_session as admin_force_logout)
+from auth import ensure_admin, register, login, logout, check_auth, create_user, list_sessions, revoke_session
 from backup import export_records, import_records, backup_info
 from categories import build_category_tree, add_category, delete_category
 from db import init_db
 from records import add_record
 from statistics import get_statistics, get_report
 
-STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # 项目根目录（本文件位于 script/）
+STATIC_DIR = os.path.join(BASE_DIR, "static")
 HOST = "0.0.0.0"
 PORT = 8080
 
@@ -135,6 +138,11 @@ class Handler(BaseHTTPRequestHandler):
                 return
             json_response(self, {"code": 0, "message": "ok", "data": list_users()})
             return
+        if path == "/api/admin/sessions":
+            if not self._require_admin():
+                return
+            json_response(self, {"code": 0, "message": "ok", "data": admin_list_sessions()})
+            return
         if path in ("/", "/index.html"):
             self._serve_file(os.path.join(STATIC_DIR, "index.html"), "text/html; charset=utf-8")
         elif path.startswith("/api/"):
@@ -145,6 +153,9 @@ class Handler(BaseHTTPRequestHandler):
             uid = user["id"]
             if path == "/api/categories":
                 json_response(self, {"categories": build_category_tree(uid)})
+            elif path == "/api/sessions":
+                json_response(self, {"code": 0, "message": "ok",
+                                     "data": list_sessions(uid, self._bearer_token())})
             elif path == "/api/backup/info":
                 json_response(self, {"code": 0, "message": "ok",
                                      "data": backup_info(uid)})
@@ -188,7 +199,8 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, {"code": 1, "message": "JSON 解析失败"}, 400)
             return
         if path == "/api/auth/login":
-            data, err = login(payload.get("username"), payload.get("password"))
+            data, err = login(payload.get("username"), payload.get("password"),
+                              self.headers.get("User-Agent", ""))
             if err:
                 json_response(self, {"code": 1, "message": err}, 400)
             else:
@@ -218,8 +230,33 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 json_response(self, {"code": 0, "message": "ok", "data": data})
             return
+        if path == "/api/sessions/revoke":
+            user = check_auth(self._bearer_token())
+            if not user:
+                json_response(self, {"code": 401, "message": "未登录或登录已过期"}, 401)
+                return
+            data, err = revoke_session(user["id"], payload.get("token"), self._bearer_token())
+            if err:
+                json_response(self, {"code": 1, "message": err}, 400)
+            else:
+                json_response(self, {"code": 0, "message": "ok", "data": data})
+            return
         if path.startswith("/api/admin/"):
             if not self._require_admin():
+                return
+            if path == "/api/admin/users/create":
+                data, err = create_user(payload.get("username"), payload.get("password"))
+                if err:
+                    json_response(self, {"code": 1, "message": err}, 400)
+                else:
+                    json_response(self, {"code": 0, "message": "ok", "data": data}, 201)
+                return
+            if path == "/api/admin/sessions/revoke":
+                data, err = admin_force_logout(payload.get("token"), self._bearer_token())
+                if err:
+                    json_response(self, {"code": 1, "message": err}, 400)
+                else:
+                    json_response(self, {"code": 0, "message": "ok", "data": data})
                 return
             uid = _to_int(payload.get("user_id"))
             if uid is None:

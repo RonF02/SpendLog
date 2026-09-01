@@ -68,3 +68,15 @@ h2{font-size:16px;margin:14px 4px 4px;}
 .reset-form{margin-top:10px;display:flex;flex-direction:column;gap:14px;align-items:stretch;}
 .reset-form input{width:100%;padding:10px;}
 .reset-form .mini-btn{width:100%;}
+/* ---- 汉堡菜单 ---- */
+.hamburger{background:none;border:none;color:#fff;font-size:22px;cursor:pointer;line-height:1;padding:2px 4px;}
+.drawer-mask{position:fixed;inset:0;background:rgba(0,0,0,.4);opacity:0;visibility:hidden;transition:.25s;z-index:900;}
+.drawer-mask.show{opacity:1;visibility:visible;}
+.drawer{position:fixed;top:0;right:0;height:100%;width:82%;max-width:360px;background:var(--bg);border-radius:16px 0 0 16px;transform:translateX(100%);transition:transform .25s;z-index:901;padding:16px;overflow-y:auto;}
+.drawer.open{transform:translateX(0);}
+.drawer-head{display:flex;align-items:center;justify-content:space-between;padding-bottom:12px;border-bottom:1px solid #e3e6ee;}
+.drawer-head span:first-child{font-size:16px;font-weight:600;}
+.drawer-close{color:#888;font-size:18px;cursor:pointer;padding:0 4px;}
+.drawer-section{background:var(--card);border-radius:14px;padding:16px;margin-top:12px;box-shadow:0 1px 4px rgba(0,0,0,.05);}
+.drawer-section .btn{margin-top:10px;}
+.drawer-logout{width:100%;margin-top:16px;padding:12px;font-size:15px;}
