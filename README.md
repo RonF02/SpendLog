@@ -160,16 +160,14 @@ SpendLog/
 │   ├── records.py        # 记账
 │   ├── statistics.py     # 统计与完整报表
 │   ├── backup.py         # 导出 Excel / 导入合并
-│   ├── excel.py          # 纯标准库读写 .xlsx
-│   └── import_xlsx.py    # （历史遗留）单用户批量导入工具
+│   └── excel.py          # 纯标准库读写 .xlsx
 ├── static/               # 前端
 │   ├── index.html        # 单页应用（登录/记一笔/统计/管理）
 │   └── style.css         # 样式
 └── data/                 # 运行时自动创建（.gitignore 已忽略）
     ├── accounts.db       # 账户与会话
     ├── 0.db              # 管理员业务库（空）
-    ├── {用户ID}.db       # 每个用户的分类 + 记账
-    └── accounting.db     # （历史遗留）旧导入脚本产物
+    └── {用户ID}.db       # 每个用户的分类 + 记账
 ```
 
 ---
@@ -269,16 +267,6 @@ SpendLog/
 
 > 记录只通过 `category_id` 关联分类，分类层级调整（如子类升级为一级）不需改动 `records`。
 > `init_db()` 仅负责建表，"分类字典"完全由用户创建，后端不硬编码。
-
----
-
-## 历史数据导入（可选，历史遗留工具）
-
-```bash
-python script/import_xlsx.py
-```
-
-旧版单用户工具：将 `data/收支明晰.xlsx` 各月份 sheet 按分类映射写入 `data/accounting.db`，脚本幂等。该库与新系统的按用户分库无关，仅用于历史数据迁移参考。
 
 ---
 
