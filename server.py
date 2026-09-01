@@ -11,6 +11,7 @@ import os
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+from auth import ensure_admin, register, login, logout, check_auth
 from categories import build_category_tree, add_category, delete_category
 from db import init_db
 from records import add_record
@@ -54,32 +55,77 @@ class Handler(BaseHTTPRequestHandler):
                     return v
         return None
 
+    def _bearer_token(self):
+        h = self.headers.get("Authorization", "")
+        if h.startswith("Bearer "):
+            return h[7:].strip()
+        return None
+
     # ---- 路由 ----
     def do_GET(self):
         path = self.path.split("?")[0]
+        if path == "/api/auth/me":
+            user = check_auth(self._bearer_token())
+            if not user:
+                json_response(self, {"code": 1, "message": "未登录或登录已过期"}, 401)
+            else:
+                json_response(self, {"code": 0, "message": "ok", "data": user})
+            return
         if path in ("/", "/index.html"):
             self._serve_file(os.path.join(STATIC_DIR, "index.html"), "text/html; charset=utf-8")
-        elif path == "/api/categories":
-            json_response(self, {"categories": build_category_tree()})
-        elif path in ("/api/statistics", "/api/report"):
-            month = self._query_param("month") or datetime.now().strftime("%Y-%m")
-            data = get_statistics(month) if path == "/api/statistics" else {"report": get_report(month)}
-            json_response(self, data)
+        elif path.startswith("/api/"):
+            user = check_auth(self._bearer_token())
+            if not user:
+                json_response(self, {"code": 401, "message": "未登录或登录已过期"}, 401)
+                return
+            uid = user["id"]
+            if path == "/api/categories":
+                json_response(self, {"categories": build_category_tree(uid)})
+            elif path in ("/api/statistics", "/api/report"):
+                month = self._query_param("month") or datetime.now().strftime("%Y-%m")
+                data = get_statistics(uid, month) if path == "/api/statistics" else {"report": get_report(uid, month)}
+                json_response(self, data)
+            else:
+                json_response(self, {"code": 404, "message": "Not Found"}, 404)
         else:
             self._serve_file(os.path.join(STATIC_DIR, path.lstrip("/")), self._guess_type(path))
 
     def do_POST(self):
         path = self.path.split("?")[0]
-        if path not in ("/api/records", "/api/categories"):
-            json_response(self, {"code": 1, "message": "Not Found"}, 404)
-            return
         try:
             payload = self._read_json()
         except Exception:
             json_response(self, {"code": 1, "message": "JSON 解析失败"}, 400)
             return
-        data, err = (add_record(payload) if path == "/api/records"
-                     else add_category(payload))
+        if path == "/api/auth/login":
+            data, err = login(payload.get("username"), payload.get("password"))
+            if err:
+                json_response(self, {"code": 1, "message": err}, 400)
+            else:
+                json_response(self, {"code": 0, "message": "ok", "data": data})
+            return
+        if path == "/api/auth/register":
+            data, err = register(payload.get("username"), payload.get("password"),
+                                 payload.get("confirm_password"))
+            if err:
+                json_response(self, {"code": 1, "message": err}, 400)
+            else:
+                json_response(self, {"code": 0, "message": "ok", "data": data}, 201)
+            return
+        if path == "/api/auth/logout":
+            logout(self._bearer_token())
+            json_response(self, {"code": 0, "message": "ok"})
+            return
+        if path not in ("/api/records", "/api/categories"):
+            json_response(self, {"code": 1, "message": "Not Found"}, 404)
+            return
+        user = check_auth(self._bearer_token())
+        if not user:
+            json_response(self, {"code": 401, "message": "未登录或登录已过期"}, 401)
+            return
+        uid = user["id"]
+        data, err = (add_record(uid, payload) if path == "/api/records"
+                     else add_category(uid, payload))
         if err:
             json_response(self, {"code": 1, "message": err}, 400)
         else:
@@ -90,7 +136,11 @@ class Handler(BaseHTTPRequestHandler):
         if path != "/api/categories":
             json_response(self, {"code": 1, "message": "Not Found"}, 404)
             return
-        data, err = delete_category(self._query_param("code"))
+        user = check_auth(self._bearer_token())
+        if not user:
+            json_response(self, {"code": 401, "message": "未登录或登录已过期"}, 401)
+            return
+        data, err = delete_category(user["id"], self._query_param("code"))
         if err:
             json_response(self, {"code": 1, "message": err}, 400)
         else:
@@ -125,6 +175,7 @@ class Handler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     init_db()
+    ensure_admin()
     server = ThreadingHTTPServer((HOST, PORT), Handler)
     print("SpendLog demo running at http://{}:{}/  ".format(HOST, PORT))
     print("手机访问请使用电脑局域网 IP，例如 http://<局域网IP>:8080/")
