@@ -82,8 +82,17 @@
 
   <section id="page-admin">
     <div class="card">
-      <h2>管理员</h2>
-      <p class="note">管理员管理界面（占位）· 即将上线</p>
+      <h2>修改密码</h2>
+      <div class="pw-form">
+        <input id="a-old" type="password" placeholder="原密码">
+        <input id="a-new" type="password" placeholder="新密码（至少 6 位）">
+        <input id="a-new2" type="password" placeholder="确认新密码">
+        <button class="btn" onclick="doChangePassword()">修改密码</button>
+      </div>
+    </div>
+    <div class="card">
+      <h2>用户管理</h2>
+      <div id="admin-users"></div>
     </div>
   </section>
 </div>
@@ -191,6 +200,7 @@ function switchPage(name){
   $('tab-stat').classList.toggle('active', name==='stat');
   $('tab-admin').classList.toggle('active', name==='admin');
   if(name==='stat') loadStat();
+  if(name==='admin') loadAdmin();
 }
 
 function mainOf(code){ return categories.find(c=>c.code===code); }
@@ -398,6 +408,94 @@ function shiftMonth(delta){
   loadStat();
 }
 
+// ---- 管理员 ----
+async function loadAdmin(){
+  try{
+    const j = await api('/api/admin/users');
+    renderUsers(j.data);
+  }catch(e){ toast(e.message); }
+}
+
+function renderUsers(users){
+  const box = $('admin-users');
+  box.innerHTML = '';
+  if(!users.length){ box.innerHTML = '<span class="note">暂无用户</span>'; return; }
+  users.forEach(u=>{
+    const created = (u.created_at||'').slice(0,10);
+    const last = u.last_login ? (' · 最近登录 ' + u.last_login.slice(0,16)) : '';
+    const meta = `注册 ${created} · ${u.record_count} 条记录${last}`;
+    const row = document.createElement('div');
+    row.className = 'user-row';
+    row.innerHTML = `
+      <div class="u-name">${u.username}${u.is_admin?'<span class="tag">管理员</span>':''}${u.disabled?'<span class="tag on">已禁用</span>':''}</div>
+      <div class="u-meta">${meta}</div>
+      ${u.is_admin?'':`
+        <div class="u-actions">
+          <button class="mini-btn" onclick="toggleResetForm(${u.id})">重置密码</button>
+          <button class="mini-btn ${u.disabled?'':'warn'}" onclick="toggleUser(${u.id}, ${u.disabled?'false':'true'})">${u.disabled?'启用':'禁用'}</button>
+          <button class="mini-btn danger" onclick="delUser(${u.id})">删除</button>
+        </div>
+        <div class="reset-form" id="reset-${u.id}" style="display:none">
+          <input type="password" id="rp-${u.id}" placeholder="新密码（至少 6 位）">
+          <button class="mini-btn" onclick="doReset(${u.id})">确认重置</button>
+        </div>`}
+    `;
+    box.appendChild(row);
+  });
+}
+
+function toggleResetForm(id){
+  const f = $('reset-'+id);
+  const show = f.style.display !== 'flex';
+  f.style.display = show ? 'flex' : 'none';
+  if(!show) $('rp-'+id).value = '';
+}
+
+async function doReset(id){
+  const pw = $('rp-'+id).value;
+  if(!pw || pw.length < 6){ toast('新密码至少 6 位'); return; }
+  try{
+    await api('/api/admin/users/reset_password', { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ user_id: id, new_password: pw }) });
+    $('reset-'+id).style.display = 'none';
+    toast('已重置，该用户需重新登录', true);
+  }catch(e){ toast(e.message); }
+}
+
+async function toggleUser(id, disable){
+  if(!confirm((disable?'禁用':'启用')+'该用户？')) return;
+  try{
+    await api('/api/admin/users/'+(disable?'disable':'enable'), { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ user_id: id }) });
+    toast(disable?'已禁用':'已启用', true);
+    loadAdmin();
+  }catch(e){ toast(e.message); }
+}
+
+async function delUser(id){
+  if(!confirm('删除该用户将清空其全部记账数据，且不可恢复。确定？')) return;
+  try{
+    await api('/api/admin/users?user_id='+id, { method:'DELETE' });
+    toast('已删除', true);
+    loadAdmin();
+  }catch(e){ toast(e.message); }
+}
+
+async function doChangePassword(){
+  const old = $('a-old').value;
+  const n1 = $('a-new').value;
+  const n2 = $('a-new2').value;
+  if(!old){ toast('请输入原密码'); return; }
+  if(!n1 || n1.length < 6){ toast('新密码至少 6 位'); return; }
+  if(n1 !== n2){ toast('两次新密码不一致'); return; }
+  try{
+    await api('/api/auth/password', { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ old_password: old, new_password: n1 }) });
+    $('a-old').value=''; $('a-new').value=''; $('a-new2').value='';
+    toast('密码已修改', true);
+  }catch(e){ toast(e.message); }
+}
+
 // 初始化
 $('f-date').value = new Date().toISOString().slice(0,10);
 $('f-month').value = new Date().toISOString().slice(0,7);
@@ -405,10 +503,14 @@ $('f-month').value = new Date().toISOString().slice(0,7);
 async function startApp(){
   hideLogin();
   const u = currentUser();
-  $('user-name').textContent = u ? (u.username + (u.is_admin ? ' · 管理员' : '')) : '';
-  $('tab-admin').style.display = (u && u.is_admin) ? 'block' : 'none';
-  if(u && !u.is_admin) switchPage('add');
-  await loadCategories().catch(e=>toast(e.message));
+  const isAdmin = u && u.is_admin;
+  $('user-name').textContent = u ? (u.username + (isAdmin ? ' · 管理员' : '')) : '';
+  $('tab-admin').style.display = isAdmin ? 'block' : 'none';
+  $('tab-add').style.display = isAdmin ? 'none' : 'block';
+  $('tab-stat').style.display = isAdmin ? 'none' : 'block';
+  if(isAdmin) switchPage('admin');
+  else switchPage('add');
+  if(!isAdmin) await loadCategories().catch(e=>toast(e.message));
 }
 
 (async function initAuth(){

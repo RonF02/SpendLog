@@ -4,6 +4,7 @@
 - 用户账号与密码哈希存于 data/accounts.db（UTF-8 编码，支持中文用户名）
 - 内置管理员：id=0，账密均为 admin
 - 业务数据按用户 id 分库：data/{id}.db
+- 管理员功能（用户管理/密码管理）见 admin.py
 密码使用 PBKDF2-HMAC-SHA256 加盐存储（标准库实现，无第三方依赖）。
 登录成功签发随机 token，存入 sessions 表用于后续请求鉴权。
 """
@@ -79,11 +80,14 @@ def login(username, password):
     username = str(username or "").strip()
     conn = get_accounts_conn()
     row = conn.execute(
-        "SELECT id, username, password_hash, salt FROM accounts WHERE username=?",
+        "SELECT id, username, password_hash, salt, disabled FROM accounts WHERE username=?",
         (username,)).fetchone()
     if not row:
         conn.close()
         return None, "用户名或密码错误"
+    if row["disabled"]:
+        conn.close()
+        return None, "该账号已被禁用，请联系管理员"
     _, h = _hash_password(password, row["salt"])
     if not hmac.compare_digest(h, row["password_hash"]):
         conn.close()
@@ -93,6 +97,9 @@ def login(username, password):
     conn.execute(
         "INSERT INTO sessions (token, user_id, expires_at) VALUES (?,?,?)",
         (token, row["id"], expires.isoformat(timespec="seconds")))
+    conn.execute(
+        "UPDATE accounts SET last_login=? WHERE id=?",
+        (datetime.now().isoformat(timespec="seconds"), row["id"]))
     conn.commit()
     conn.close()
     return {"token": token, "user": _user_from_row(row)}, None
@@ -116,9 +123,22 @@ def check_auth(token):
         return None
     conn = get_accounts_conn()
     row = conn.execute(
-        "SELECT a.id, a.username FROM sessions s "
+        "SELECT a.id, a.username, a.disabled FROM sessions s "
         "JOIN accounts a ON a.id = s.user_id "
         "WHERE s.token=? AND s.expires_at>?",
         (token, datetime.now().isoformat(timespec="seconds"))).fetchone()
     conn.close()
+    if not row or row["disabled"]:
+        return None
     return _user_from_row(row) if row else None
+
+
+def invalidate_sessions(uid, keep_token=None):
+    """删除某用户全部会话；keep_token 非空时保留该 token（改密后保持当前登录）。"""
+    conn = get_accounts_conn()
+    if keep_token:
+        conn.execute("DELETE FROM sessions WHERE user_id=? AND token<>?", (uid, keep_token))
+    else:
+        conn.execute("DELETE FROM sessions WHERE user_id=?", (uid,))
+    conn.commit()
+    conn.close()

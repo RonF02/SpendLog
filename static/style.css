@@ -52,3 +52,17 @@ h2{font-size:16px;margin:14px 4px 4px;}
 .login-card input{margin-bottom:12px;}
 .login-sub{margin-top:12px;display:flex;flex-direction:column;gap:8px;align-items:center;font-size:13px;}
 .login-sub span{cursor:pointer;color:var(--main);}
+/* ---- 管理员页 ---- */
+.pw-form input{margin-bottom:8px;}
+.user-row{border-bottom:1px solid #f0f2f7;padding:10px 0;}
+.user-row:last-child{border-bottom:none;}
+.u-name{font-size:15px;font-weight:600;display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+.u-meta{font-size:12px;color:#999;margin:4px 0;}
+.u-actions{display:flex;gap:8px;margin-top:6px;flex-wrap:wrap;}
+.mini-btn.warn{background:#f0a020;}
+.mini-btn.danger{background:var(--red);}
+.tag{font-size:11px;color:#fff;background:#bbb;border-radius:4px;padding:1px 6px;}
+.tag.on{background:var(--red);}
+.reset-form{margin-top:10px;display:flex;flex-direction:column;gap:14px;align-items:stretch;}
+.reset-form input{width:100%;padding:10px;}
+.reset-form .mini-btn{width:100%;}

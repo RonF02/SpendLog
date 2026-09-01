@@ -1,0 +1,111 @@
+# -*- coding: utf-8 -*-
+"""管理员功能：用户管理、密码管理。
+
+从 auth.py 中独立出来的管理员逻辑，与账户认证（auth.py）单向依赖：
+- auth.py 提供哈希、会话等底层能力
+- admin.py 负责用户列表 / 重置密码 / 禁用启用 / 删除用户 / 修改密码
+"""
+import hmac
+
+from auth import _hash_password, invalidate_sessions
+from db import get_accounts_conn, get_user_conn, delete_user_db
+
+
+def _record_count(uid):
+    """统计指定用户业务库的记录数（库不存在返回 0）。"""
+    try:
+        conn = get_user_conn(uid)
+        n = conn.execute("SELECT COUNT(*) AS c FROM records").fetchone()["c"]
+        conn.close()
+        return n
+    except Exception:
+        return 0
+
+
+def list_users():
+    """返回所有用户及统计数据（供管理员查看）。"""
+    conn = get_accounts_conn()
+    rows = conn.execute(
+        "SELECT id, username, created_at, last_login, disabled FROM accounts ORDER BY id").fetchall()
+    conn.close()
+    return [{
+        "id": r["id"],
+        "username": r["username"],
+        "is_admin": r["id"] == 0,
+        "disabled": bool(r["disabled"]),
+        "created_at": r["created_at"],
+        "last_login": r["last_login"],
+        "record_count": _record_count(r["id"]),
+    } for r in rows]
+
+
+def change_password(uid, old_password, new_password, keep_token=None):
+    """修改自己的密码（校验原密码）。成功仅保留当前会话。"""
+    if not new_password or len(new_password) < 6:
+        return None, "新密码长度至少 6 位"
+    conn = get_accounts_conn()
+    row = conn.execute(
+        "SELECT password_hash, salt FROM accounts WHERE id=?", (uid,)).fetchone()
+    if not row:
+        conn.close()
+        return None, "账号不存在"
+    _, h = _hash_password(old_password, row["salt"])
+    if not hmac.compare_digest(h, row["password_hash"]):
+        conn.close()
+        return None, "原密码错误"
+    salt, h = _hash_password(new_password)
+    conn.execute("UPDATE accounts SET password_hash=?, salt=? WHERE id=?", (h, salt, uid))
+    conn.commit()
+    conn.close()
+    invalidate_sessions(uid, keep_token)
+    return True, None
+
+
+def admin_reset_password(target_uid, new_password):
+    """管理员重置指定用户密码，并使其所有会话失效。"""
+    if target_uid == 0:
+        return None, "不能重置内置管理员密码，请使用修改密码功能"
+    if not new_password or len(new_password) < 6:
+        return None, "新密码长度至少 6 位"
+    conn = get_accounts_conn()
+    if not conn.execute("SELECT 1 FROM accounts WHERE id=?", (target_uid,)).fetchone():
+        conn.close()
+        return None, "用户不存在"
+    salt, h = _hash_password(new_password)
+    conn.execute("UPDATE accounts SET password_hash=?, salt=? WHERE id=?",
+                 (h, salt, target_uid))
+    conn.commit()
+    conn.close()
+    invalidate_sessions(target_uid)
+    return True, None
+
+
+def set_user_disabled(target_uid, disabled):
+    """禁用/启用用户。禁用时使其会话失效；不能操作内置管理员。"""
+    if target_uid == 0:
+        return None, "不能操作内置管理员账号"
+    conn = get_accounts_conn()
+    if not conn.execute("SELECT 1 FROM accounts WHERE id=?", (target_uid,)).fetchone():
+        conn.close()
+        return None, "用户不存在"
+    conn.execute("UPDATE accounts SET disabled=? WHERE id=?", (1 if disabled else 0, target_uid))
+    conn.commit()
+    conn.close()
+    if disabled:
+        invalidate_sessions(target_uid)
+    return True, None
+
+
+def delete_user(target_uid):
+    """删除用户及其业务库。不能删除内置管理员。"""
+    if target_uid == 0:
+        return None, "不能删除内置管理员账号"
+    conn = get_accounts_conn()
+    conn.execute("DELETE FROM sessions WHERE user_id=?", (target_uid,))
+    cur = conn.execute("DELETE FROM accounts WHERE id=?", (target_uid,))
+    conn.commit()
+    conn.close()
+    if cur.rowcount == 0:
+        return None, "用户不存在"
+    delete_user_db(target_uid)
+    return True, None
