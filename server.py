@@ -11,6 +11,8 @@ import os
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+from admin import (list_users, change_password, admin_reset_password,
+                   set_user_disabled, delete_user)
 from auth import ensure_admin, register, login, logout, check_auth
 from categories import build_category_tree, add_category, delete_category
 from db import init_db
@@ -30,6 +32,13 @@ def json_response(handler, data, status=200):
     handler.send_header("Cache-Control", "no-store")
     handler.end_headers()
     handler.wfile.write(body)
+
+
+def _to_int(v):
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return None
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -61,6 +70,17 @@ class Handler(BaseHTTPRequestHandler):
             return h[7:].strip()
         return None
 
+    def _require_admin(self):
+        """管理员鉴权。通过返回用户信息，否则已发错误响应并返回 None。"""
+        user = check_auth(self._bearer_token())
+        if not user:
+            json_response(self, {"code": 401, "message": "未登录或登录已过期"}, 401)
+            return None
+        if not user["is_admin"]:
+            json_response(self, {"code": 403, "message": "无权限"}, 403)
+            return None
+        return user
+
     # ---- 路由 ----
     def do_GET(self):
         path = self.path.split("?")[0]
@@ -70,6 +90,11 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"code": 1, "message": "未登录或登录已过期"}, 401)
             else:
                 json_response(self, {"code": 0, "message": "ok", "data": user})
+            return
+        if path == "/api/admin/users":
+            if not self._require_admin():
+                return
+            json_response(self, {"code": 0, "message": "ok", "data": list_users()})
             return
         if path in ("/", "/index.html"):
             self._serve_file(os.path.join(STATIC_DIR, "index.html"), "text/html; charset=utf-8")
@@ -116,6 +141,39 @@ class Handler(BaseHTTPRequestHandler):
             logout(self._bearer_token())
             json_response(self, {"code": 0, "message": "ok"})
             return
+        if path == "/api/auth/password":
+            user = check_auth(self._bearer_token())
+            if not user:
+                json_response(self, {"code": 401, "message": "未登录或登录已过期"}, 401)
+                return
+            data, err = change_password(user["id"], payload.get("old_password"),
+                                        payload.get("new_password"), self._bearer_token())
+            if err:
+                json_response(self, {"code": 1, "message": err}, 400)
+            else:
+                json_response(self, {"code": 0, "message": "ok", "data": data})
+            return
+        if path.startswith("/api/admin/"):
+            if not self._require_admin():
+                return
+            uid = _to_int(payload.get("user_id"))
+            if uid is None:
+                json_response(self, {"code": 1, "message": "缺少有效的 user_id"}, 400)
+                return
+            if path == "/api/admin/users/reset_password":
+                data, err = admin_reset_password(uid, payload.get("new_password"))
+            elif path == "/api/admin/users/disable":
+                data, err = set_user_disabled(uid, True)
+            elif path == "/api/admin/users/enable":
+                data, err = set_user_disabled(uid, False)
+            else:
+                json_response(self, {"code": 1, "message": "Not Found"}, 404)
+                return
+            if err:
+                json_response(self, {"code": 1, "message": err}, 400)
+            else:
+                json_response(self, {"code": 0, "message": "ok", "data": data})
+            return
         if path not in ("/api/records", "/api/categories"):
             json_response(self, {"code": 1, "message": "Not Found"}, 404)
             return
@@ -133,6 +191,19 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_DELETE(self):
         path = self.path.split("?")[0]
+        if path == "/api/admin/users":
+            if not self._require_admin():
+                return
+            uid = _to_int(self._query_param("user_id"))
+            if uid is None:
+                json_response(self, {"code": 1, "message": "缺少有效的 user_id"}, 400)
+                return
+            data, err = delete_user(uid)
+            if err:
+                json_response(self, {"code": 1, "message": err}, 400)
+            else:
+                json_response(self, {"code": 0, "message": "ok", "data": data})
+            return
         if path != "/api/categories":
             json_response(self, {"code": 1, "message": "Not Found"}, 404)
             return
@@ -156,6 +227,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")  # 开发期禁用缓存，改动即时生效
         self.end_headers()
         self.wfile.write(body)
 
