@@ -32,6 +32,13 @@ def user_db_path(uid):
     return os.path.join(DATA_DIR, "{}.db".format(uid))
 
 
+def delete_user_db(uid):
+    """删除指定用户业务库文件（不存在则忽略）。"""
+    path = user_db_path(uid)
+    if os.path.exists(path):
+        os.remove(path)
+
+
 def get_user_conn(uid):
     """指定用户业务库连接。"""
     return get_conn(user_db_path(uid))
@@ -45,7 +52,9 @@ def _init_accounts():
             username TEXT NOT NULL UNIQUE,
             password_hash TEXT NOT NULL,
             salt TEXT NOT NULL,
-            created_at TEXT NOT NULL
+            created_at TEXT NOT NULL,
+            disabled INTEGER NOT NULL DEFAULT 0,
+            last_login TEXT
         );
         CREATE TABLE IF NOT EXISTS sessions (
             token TEXT PRIMARY KEY,
@@ -54,8 +63,18 @@ def _init_accounts():
             FOREIGN KEY (user_id) REFERENCES accounts(id)
         );
     """)
+    _migrate_accounts(conn)
     conn.commit()
     conn.close()
+
+
+def _migrate_accounts(conn):
+    """老库补列：disabled（禁用）、last_login（最近登录）。幂等，可重复执行。"""
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(accounts)")}
+    if "disabled" not in cols:
+        conn.execute("ALTER TABLE accounts ADD COLUMN disabled INTEGER NOT NULL DEFAULT 0")
+    if "last_login" not in cols:
+        conn.execute("ALTER TABLE accounts ADD COLUMN last_login TEXT")
 
 
 def init_user_db(uid):
