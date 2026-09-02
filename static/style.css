@@ -22,6 +22,7 @@ input,select{width:100%;padding:12px;font-size:16px;border:1px solid #e3e6ee;bor
 .mini-btn{padding:9px 14px;border:none;border-radius:8px;background:var(--main);color:#fff;font-size:14px;cursor:pointer;}
 .chip{padding:10px 16px;border-radius:20px;border:1px solid #d9dee8;background:#f7f8fb;font-size:14px;cursor:pointer;color:#555;position:relative;-webkit-user-select:none;-moz-user-select:none;user-select:none;-webkit-touch-callout:none;}
 .chip.active{background:var(--main);border-color:var(--main-deep);color:#fff;font-weight:600;box-shadow:0 2px 6px rgba(63,124,255,.35);}
+.chip.drag-marker{background:#eef2ff;border:1px dashed var(--main);color:transparent;opacity:.6;}
 .del-mark{position:absolute;top:-8px;right:-8px;width:24px;height:24px;border-radius:50%;display:none;align-items:center;justify-content:center;font-weight:700;font-size:15px;background:#fff;box-shadow:0 1px 5px rgba(0,0,0,.3);}
 .del-mark.show{display:flex;}
 .del-mark.red{color:var(--red);border:2px solid var(--red);}
@@ -29,6 +30,7 @@ input,select{width:100%;padding:12px;font-size:16px;border:1px solid #e3e6ee;bor
 .btn{width:100%;padding:14px;border:none;border-radius:12px;background:var(--main);color:#fff;font-size:17px;cursor:pointer;margin-top:14px;}
 .filebtn{display:block;text-align:center;margin-top:10px;}
 .filebtn input{display:none;}
+.btn-danger{background:var(--red);}
 .stat-top{display:flex;gap:10px;}
 .stat-card{flex:1;background:var(--card);border-radius:14px;padding:14px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,.05);}
 .stat-card .v{font-size:20px;font-weight:700;}
