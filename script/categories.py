@@ -27,7 +27,7 @@ def make_code(name, taken):
 def build_category_tree(uid):
     conn = get_user_conn(uid)
     rows = conn.execute(
-        "SELECT id, code, name, parent_id, type FROM categories").fetchall()
+        "SELECT id, code, name, parent_id, type, sort_order FROM categories").fetchall()
     used_ids = {r[0] for r in conn.execute("SELECT DISTINCT category_id FROM records")}
     mains = {}
     for r in rows:
@@ -35,17 +35,24 @@ def build_category_tree(uid):
             mains[r["id"]] = {
                 "code": r["code"], "name": r["name"],
                 "used": r["id"] in used_ids, "children": [],
+                "sort": r["sort_order"] if r["sort_order"] is not None else r["id"],
             }
     for r in rows:
         if r["type"] == "sub" and r["parent_id"] in mains:
             mains[r["parent_id"]]["children"].append(
-                {"code": r["code"], "name": r["name"], "used": r["id"] in used_ids})
+                {"code": r["code"], "name": r["name"], "used": r["id"] in used_ids,
+                 "sort": r["sort_order"] if r["sort_order"] is not None else r["id"]})
     for m in mains.values():
-        m["children"].sort(key=lambda c: c["name"])
+        m["children"].sort(key=lambda c: c["sort"])
         if any(c["used"] for c in m["children"]):  # 任一子被用则主类不可删
             m["used"] = True
-    result = sorted(mains.values(), key=lambda c: c["code"])
+    result = sorted(mains.values(), key=lambda c: c["sort"])
     conn.close()
+    # 仅暴露业务字段，排序用的内部 sort 不返回前端
+    for m in result:
+        m.pop("sort", None)
+        for c in m["children"]:
+            c.pop("sort", None)
     return result
 
 
@@ -117,3 +124,36 @@ def delete_category(uid, code):
     conn.commit()
     conn.close()
     return {"code": code}, None
+
+
+def reorder_categories(uid, payload):
+    """按传入的 codes 顺序更新 sort_order。
+
+    一级分类：payload={codes:[...]}；二级分类：payload={codes:[...], parent_code:主类code}。
+    """
+    codes = payload.get("codes")
+    if not isinstance(codes, list) or not codes:
+        return None, "缺少分类顺序列表"
+    parent_code = str(payload.get("parent_code") or "").strip() or None
+    conn = get_user_conn(uid)
+    try:
+        params = []
+        for i, code in enumerate(codes):
+            code = str(code or "").strip()
+            if parent_code:
+                r = conn.execute(
+                    "SELECT id FROM categories WHERE code=? AND parent_id=("
+                    "SELECT id FROM categories WHERE code=? AND type='main')",
+                    (code, parent_code)).fetchone()
+            else:
+                r = conn.execute(
+                    "SELECT id FROM categories WHERE code=? AND type='main'",
+                    (code,)).fetchone()
+            if not r:
+                return None, "分级错误：分类不存在于该分组：{}".format(code)
+            params.append((i, r["id"]))
+        conn.executemany("UPDATE categories SET sort_order=? WHERE id=?", params)
+        conn.commit()
+    finally:
+        conn.close()
+    return {"count": len(codes)}, None

@@ -87,7 +87,7 @@ def get_report(uid, month):
     start, end = _month_range(month)
     rows = conn.execute(
         "SELECT r.date, r.amount, r.note, r.payment, "
-        "s.type AS s_type, main.name AS main_name, s.name AS sub_name "
+        "s.type AS s_type, main.name AS main_name, main.code AS code, s.name AS sub_name "
         "FROM records r "
         "JOIN categories s ON r.category_id=s.id "
         "JOIN categories main ON main.id = COALESCE(s.parent_id, s.id) AND main.type='main' "
@@ -98,6 +98,7 @@ def get_report(uid, month):
         "date": x["date"],
         "amount": round(x["amount"], 2),
         "main": x["main_name"],
+        "code": x["code"],   # 主分类 code，供前端按分类筛选
         # 记录指向二级用子类名，指向一级则用一级名括起区分
         "sub": x["sub_name"] if x["s_type"] == "sub" else ("（" + x["sub_name"] + "）"),
         "note": x["note"],

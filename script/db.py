@@ -95,6 +95,7 @@ def init_user_db(uid):
             name TEXT NOT NULL,
             parent_id INTEGER,
             type TEXT CHECK(type IN ('main', 'sub')) NOT NULL,
+            sort_order INTEGER,
             FOREIGN KEY (parent_id) REFERENCES categories(id)
         );
         CREATE TABLE IF NOT EXISTS records (
@@ -114,6 +115,30 @@ def init_user_db(uid):
     conn.close()
 
 
+def _migrate_user_categories(conn):
+    """老库补列：categories.sort_order（分类拖拽排序）。幂等，可重复执行。"""
+    tables = {r["name"] for r in conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table'")}
+    if "categories" not in tables:
+        return
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(categories)")}
+    if "sort_order" not in cols:
+        conn.execute("ALTER TABLE categories ADD COLUMN sort_order INTEGER")
+    # 回填空值：排序未设置时按 id 顺序兜底
+    conn.execute("UPDATE categories SET sort_order = id WHERE sort_order IS NULL")
+
+
 def init_db():
     """初始化账户库结构。"""
     _init_accounts()
+    # 迁移既有用户业务库：补 categories.sort_order 列
+    if os.path.isdir(DATA_DIR):
+        for f in os.listdir(DATA_DIR):
+            if f == "accounts.db" or not f.endswith(".db"):
+                continue
+            conn = get_conn(os.path.join(DATA_DIR, f))
+            try:
+                _migrate_user_categories(conn)
+                conn.commit()
+            finally:
+                conn.close()
