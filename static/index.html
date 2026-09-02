@@ -71,10 +71,13 @@
     <div class="card" id="s-bymain"></div>
     <h2>支出明细（按二级分类）</h2>
     <div class="card" id="s-bysub"></div>
-    <h2>完整报表（含备注）</h2>
+    <h2>完整报表</h2>
     <div class="card">
       <div class="addbar" onclick="toggleReport()" id="report-toggle">＋ 展开本月完整报表</div>
-      <div id="s-report" style="display:none;margin-top:4px"></div>
+      <div id="s-report" style="display:none;margin-top:4px">
+        <select id="report-filter" onchange="renderReport()"><option value="">全部分类</option></select>
+        <div id="report-body" style="margin-top:4px"></div>
+      </div>
     </div>
   </section>
 
@@ -120,6 +123,11 @@
       <h2>会话管理</h2>
       <p class="note">查看已登录设备，可强制下线（如某台手机丢失）</p>
       <div id="session-list"></div>
+    </div>
+    <div class="drawer-section">
+      <h2>数据管理</h2>
+      <p class="note">清空你的全部记账记录与分类（不可恢复，请先导出备份）</p>
+      <button class="btn btn-danger" onclick="clearAllData()">删除全部数据</button>
     </div>
   </div>
   <div id="drawer-admin-sessions" class="drawer-section" style="display:none">
@@ -409,6 +417,92 @@ function renderSubChips(code){
   setTimeout(()=>{ if(box.firstChild) box.firstChild.classList.add('active'); },0);
 }
 
+// ---- 分类标签拖动排序 ----
+let drag = null;
+function enableChipDrag(box, isMain){
+  box.addEventListener('pointerdown', e=>{
+    // 仅左键/手指按下，且目标是分类标签（忽略删除大叉）
+    if(e.button !== undefined && e.button !== 0) return;
+    const chip = (e.target.closest ? e.target.closest('.chip') : null);
+    if(!chip || chip.classList.contains('drag-marker')) return;
+    if(e.target.classList.contains('del-mark')) return;
+    closeDelMark(); // 隐藏其余删除大叉，但不清除长按计时器（由 startGhost / bindChipDelete 的移动监听负责）
+    drag = { box, chip, isMain, id: e.pointerId, started: false, sx: e.clientX, sy: e.clientY };
+    if(box.setPointerCapture){ try{ box.setPointerCapture(e.pointerId); }catch(err){} }
+  });
+  box.addEventListener('pointermove', e=>{
+    if(!drag || drag.box !== box || e.pointerId !== drag.id) return;
+    if(!drag.started){
+      if(Math.hypot(e.clientX-drag.sx, e.clientY-drag.sy) < 6) return; // 超过阈值才判定为拖动
+      startGhost(e);
+    }
+    // 拖拽标签跟随指针
+    drag.chip.style.transform =
+      `translate(${e.clientX-drag.grabDX}px, ${e.clientY-drag.grabDY}px)`;
+    relocateMarker(e);
+  });
+  const end = e=>{
+    if(!drag || drag.box !== box || e.pointerId !== drag.id) return;
+    finishDrag(e);
+  };
+  box.addEventListener('pointerup', end);
+  box.addEventListener('pointercancel', end);
+}
+function startGhost(e){
+  const d = drag;
+  d.started = true;
+  if(delTimer) clearTimeout(delTimer);
+  closeDelMark();
+  const r = d.chip.getBoundingClientRect();
+  d.grabDX = e.clientX - r.left;
+  d.grabDY = e.clientY - r.top;
+  // 原地留一个占位标记，被拖标签改为固定跟随指针
+  d.marker = document.createElement('div');
+  d.marker.className = 'chip drag-marker';
+  d.chip.insertAdjacentElement('beforebegin', d.marker);
+  d.chip.style.position = 'fixed';
+  d.chip.style.left = '0';
+  d.chip.style.top = '0';
+  d.chip.style.zIndex = '99';
+  d.chip.style.pointerEvents = 'none';
+  d.chip.style.opacity = '.85';
+  d.chip.style.boxShadow = '0 6px 18px rgba(0,0,0,.18)';
+  d.chip.style.transition = 'none';
+  d.chip.style.transform =
+    `translate(${e.clientX-d.grabDX}px, ${e.clientY-d.grabDY}px)`;
+}
+function relocateMarker(e){
+  const d = drag;
+  const under = document.elementFromPoint(e.clientX, e.clientY);
+  const target = under && under.closest ? under.closest('.chip') : null;
+  if(!target || target === d.chip || target === d.marker) return;
+  const r = target.getBoundingClientRect();
+  const cx = r.left + r.width/2, cy = r.top + r.height/2;
+  const before = (Math.abs(e.clientY - cy) <= r.height/2) ? (e.clientX < cx) : (e.clientY < cy);
+  d.box.insertBefore(d.marker, before ? target : target.nextSibling);
+}
+function finishDrag(e){
+  const d = drag;
+  drag = null;
+  if(!d.started) return; // 只是点击/长按，交回原有逻辑
+  const chip = d.chip, marker = d.marker;
+  chip.style.cssText = '';
+  d.box.insertBefore(chip, marker); // 落到占位处
+  marker.remove();
+  const codes = Array.from(d.box.querySelectorAll('.chip')).map(c=>c.dataset.code);
+  persistOrder(d.isMain, codes);
+}
+async function persistOrder(isMain, codes){
+  const body = isMain ? { codes } : { codes, parent_code: curMain };
+  try{
+    await api('/api/categories/reorder', { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(body) });
+    await loadCategories();
+  }catch(err){ toast(err.message); await loadCategories(); }
+}
+enableChipDrag($('chips-main'), true);
+enableChipDrag($('chips-sub'), false);
+
 async function submitRecord(){
   const amount = parseFloat($('f-amount').value);
   if(isNaN(amount) || amount===0){ toast('请输入有效金额'); return; }
@@ -462,6 +556,18 @@ function exportData(){
     .catch(()=>{});
 }
 
+// 删除全部数据：需二次确认
+async function clearAllData(){
+  if(!confirm('确定要删除你的全部记账数据（所有记录与分类）吗？\n此操作无法撤销，建议先导出备份。')) return;
+  if(!confirm('二次确认：删除后将清空全部记录与分类，重新从零开始，确定永久删除？')) return;
+  try{
+    await api('/api/data', { method:'DELETE' });
+    toast('已删除全部数据', true);
+    await loadCategories();
+    loadBackupInfo();
+  }catch(e){ toast(e.message); }
+}
+
 async function importData(input){
   const file = input.files && input.files[0];
   if(!file) return;
@@ -503,17 +609,25 @@ async function loadStat(){
 }
 
 async function renderReport(){
-  const box = $('s-report');
+  const sel = $('report-filter');
+  const body = $('report-body');
   try{
     const j = await api('/api/report?month='+(curReportMonth||$('f-month').value));
-    const list = j.report || [];
-    if(!list.length){ box.innerHTML = '<span class="note">本月暂无记录</span>'; toggleReport(); return; }
-    box.innerHTML = list.map(r=>
+    const full = j.report || [];
+    if(!full.length){ body.innerHTML = '<span class="note">本月暂无记录</span>'; return; }
+    // 填充分类筛选（保留当前选中项）
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">全部分类</option>' +
+      categories.map(c=>`<option value="${c.code}">${c.name}</option>`).join('');
+    sel.value = cur;
+    const code = sel.value;
+    const list = code ? full.filter(r=>r.code===code) : full;
+    body.innerHTML = list.length ? list.map(r=>
       `<div class="cat-row"><span>${r.date} · ${r.main}<i class="subname">${r.sub}</i></span>`+
       `<span class="amt ${r.amount<0?'red':'green'}">${fmt(r.amount)}</span></div>`+
       `<div class="note">${r.note||'—'}${r.payment?' · '+r.payment:''}</div>`
-    ).join('');
-  }catch(e){ box.innerHTML = '<span class="note">'+e.message+'</span>'; }
+    ).join('') : '<span class="note">该分类本月无记录</span>';
+  }catch(e){ body.innerHTML = '<span class="note">'+e.message+'</span>'; }
 }
 
 function toggleReport(){
