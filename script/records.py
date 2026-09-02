@@ -35,3 +35,13 @@ def add_record(uid, payload):
     conn.commit()
     conn.close()
     return {"id": rid}, None
+
+
+def clear_user_data(uid):
+    """清空指定用户的全部记账数据（记录 + 分类）。"""
+    conn = get_user_conn(uid)
+    conn.execute("DELETE FROM records")
+    conn.execute("DELETE FROM categories")
+    conn.commit()
+    conn.close()
+    return True, None
