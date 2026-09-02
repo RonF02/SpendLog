@@ -19,9 +19,9 @@ from admin import (list_users, change_password, admin_reset_password,
                    force_logout_session as admin_force_logout)
 from auth import ensure_admin, register, login, logout, check_auth, create_user, list_sessions, revoke_session
 from backup import export_records, import_records, backup_info
-from categories import build_category_tree, add_category, delete_category
+from categories import build_category_tree, add_category, delete_category, reorder_categories
 from db import init_db
-from records import add_record
+from records import add_record, clear_user_data
 from statistics import get_statistics, get_report
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # 项目根目录（本文件位于 script/）
@@ -284,6 +284,17 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 json_response(self, {"code": 0, "message": "ok", "data": data})
             return
+        if path == "/api/categories/reorder":
+            user = check_auth(self._bearer_token())
+            if not user:
+                json_response(self, {"code": 401, "message": "未登录或登录已过期"}, 401)
+                return
+            data, err = reorder_categories(user["id"], payload)
+            if err:
+                json_response(self, {"code": 1, "message": err}, 400)
+            else:
+                json_response(self, {"code": 0, "message": "ok", "data": data})
+            return
         if path not in ("/api/records", "/api/categories"):
             json_response(self, {"code": 1, "message": "Not Found"}, 404)
             return
@@ -301,6 +312,17 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_DELETE(self):
         path = self.path.split("?")[0]
+        if path == "/api/data":
+            user = check_auth(self._bearer_token())
+            if not user:
+                json_response(self, {"code": 401, "message": "未登录或登录已过期"}, 401)
+                return
+            data, err = clear_user_data(user["id"])
+            if err:
+                json_response(self, {"code": 1, "message": err}, 400)
+            else:
+                json_response(self, {"code": 0, "message": "ok", "data": data})
+            return
         if path == "/api/admin/users":
             if not self._require_admin():
                 return
