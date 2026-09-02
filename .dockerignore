@@ -1,0 +1,7 @@
+# 排除本地开发文件，避免打进镜像
+.git
+.gitignore
+data/
+__pycache__/
+*.pyc
+*.log
